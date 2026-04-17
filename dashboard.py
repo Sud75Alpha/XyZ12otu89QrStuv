@@ -32,7 +32,8 @@ except Exception:
     API_KEY = os.getenv("API_KEY", "gold_dxy_secret_2024")
 
 API_TIMEOUT = 4   # secondes
-HEADERS     = {"X-API-Key": API_KEY}
+API_KEY = st.secrets["API_KEY"]
+HEADERS = {"X-API-Key": API_KEY}
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  PAGE CONFIG
@@ -151,6 +152,7 @@ C = {
     "green":  "#00d4aa",
     "red":    "#ff4d6a",
     "purple": "#a78bfa",
+    "text3": "#aaaaaa",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -435,6 +437,8 @@ def make_chart(candles: List[Dict], symbol: str, color: str, tf: str,
     # ── Layout ──
     ax = dict(showgrid=True, gridcolor=C["grid"], gridwidth=1,
               zeroline=False, tickfont=dict(size=9, color=C["text"]), linecolor=C["grid"])
+    tf3 = C.get("text3", "#2e3a4e")
+    tf_label_str = TF_LABELS.get(tf, tf)
     fig.update_layout(
         paper_bgcolor=C["bg2"], plot_bgcolor=C["bg"],
         margin=dict(l=0, r=58, t=34, b=0), height=420,
@@ -443,7 +447,7 @@ def make_chart(candles: List[Dict], symbol: str, color: str, tf: str,
         hovermode="x unified", xaxis_rangeslider_visible=False,
         title=dict(
             text=f'<b style="color:{color}">{symbol}</b>'
-                 f'  <span style="color:{C["text3"]};font-size:9px">● {TF_LABELS.get(tf, tf)}</span>',
+                 f'  <span style="color:{tf3};font-size:9px">● {tf_label_str}</span>',
             x=0.01, font=dict(size=12, family="Syne"),
         ),
         dragmode="pan",

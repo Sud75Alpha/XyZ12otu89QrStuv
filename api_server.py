@@ -536,6 +536,11 @@ def get_snapshot(request: Request):
     _check_key(request)
     return JSONResponse(STATE.snapshot())
 
+@app.get("/snapshot")
+def snapshot_compat(request: Request):
+    _check_key(request)
+    return JSONResponse(STATE.snapshot())
+
 
 @app.get("/api/prices")
 def get_prices(request: Request):
