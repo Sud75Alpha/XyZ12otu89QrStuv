@@ -422,3 +422,45 @@
 [2026-04-17 09:45:55] INFO | 
 ⛔ Arrêt (Ctrl+C)
 [2026-04-17 09:45:55] INFO | Système arrêté.
+[2026-04-17 09:49:39] INFO | =======================================================
+[2026-04-17 09:49:39] INFO |   GOLD / DXY SIGNAL SYSTEM — DÉMARRAGE
+[2026-04-17 09:49:39] INFO |   Mode SL : INTELLIGENT (zones)
+[2026-04-17 09:49:39] INFO |   Dashboard : DÉSACTIVÉ
+[2026-04-17 09:49:39] INFO | =======================================================
+[2026-04-17 09:49:39] INFO | MT5 connecté | Compte: 435312756 | Broker: Exness Technologies Ltd
+[2026-04-17 09:49:39] INFO | Symbole GOLD: XAUUSDm
+[2026-04-17 09:49:39] INFO | Symbole DXY (partiel): USDXOFm
+[2026-04-17 09:49:43] INFO | ✅ Telegram envoyé
+[2026-04-17 09:49:43] INFO | Boucle démarrée — scan toutes les 120s
+[2026-04-17 09:49:43] INFO | Appuyer Ctrl+C pour arrêter
+
+[2026-04-17 09:49:43] INFO | ─── Cycle #1 | 09:49:43 ───
+[2026-04-17 09:49:43] INFO | [H1] Corr: -0.247 → -0.014 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:49:43] INFO | [M15] Corr: +0.089 → -0.012 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:49:43] INFO | [M5] Corr: +0.253 → +0.047 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:49:43] INFO | Aucun signal H1 détecté
+[2026-04-17 09:51:43] INFO | ─── Cycle #2 | 09:51:43 ───
+[2026-04-17 09:51:43] INFO | [H1] Corr: -0.247 → -0.016 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:51:43] INFO | [M15] Corr: +0.089 → -0.017 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:51:43] INFO | [M5] Corr: +0.253 → +0.043 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:51:43] INFO | Aucun signal H1 détecté
+[2026-04-17 09:53:43] INFO | ─── Cycle #3 | 09:53:43 ───
+[2026-04-17 09:53:44] INFO | [H1] Corr: -0.247 → -0.014 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:53:44] INFO | [M15] Corr: +0.089 → -0.014 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:53:45] INFO | [M5] Corr: +0.253 → +0.043 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:53:45] INFO | Aucun signal H1 détecté
+[2026-04-17 09:55:45] INFO | ─── Cycle #4 | 09:55:45 ───
+[2026-04-17 09:55:45] INFO | [H1] Corr: -0.247 → -0.014 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:55:45] INFO | [M15] Corr: +0.089 → -0.013 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:55:45] INFO | [M5] Corr: +0.195 → +0.021 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:55:45] INFO | Aucun signal H1 détecté
+[2026-04-17 09:57:45] INFO | ─── Cycle #5 | 09:57:45 ───
+[2026-04-17 09:57:46] INFO | [H1] Corr: -0.247 → -0.014 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:57:46] INFO | [M15] Corr: +0.089 → -0.016 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:57:46] INFO | [M5] Corr: +0.195 → +0.018 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:57:46] INFO | Aucun signal H1 détecté
+[2026-04-17 09:59:46] INFO | ─── Cycle #6 | 09:59:46 ───
+[2026-04-17 09:59:47] INFO | [H1] Corr: -0.247 → -0.007 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:59:47] INFO | [M15] Corr: +0.089 → -0.002 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:59:47] INFO | [M5] Corr: +0.195 → +0.033 | Gold: ↓ Baisse | DXY: ↓ Baisse
+[2026-04-17 09:59:47] INFO | Aucun signal H1 détecté
