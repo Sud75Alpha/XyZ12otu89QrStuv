@@ -993,4 +993,146 @@ with tab2:
             <div style="font-size:.7rem;line-height:2.2;">
                 <span style="color:#6b7a94;">Support:</span>
                 <b style="color:#00d4aa;float:right;">{zones.get('support',0):,.2f}</b><br>
-                <span style="c
+                <span style="color:#6b7a94;">Résistance:</span>
+                <b style="color:#ff4d6a;float:right;">{zones.get('resistance',0):,.2f}</b><br>
+                <span style="color:#6b7a94;">ATR:</span>
+                <b style="color:#f7b529;float:right;">{atr:.3f}</b><br>
+                <span style="color:#6b7a94;">FVG Filter:</span>
+                <b style="color:#a78bfa;float:right;">{fvg_f:.3f}</b>
+            </div>
+        </div>
+        <div class="card">
+            <div class="lbl" style="margin-bottom:8px;">FVG & Order Blocks</div>
+            <div style="font-size:.7rem;line-height:2.2;">
+                <span style="color:#6b7a94;">FVG Bullish:</span>
+                <b style="color:#00d4aa;float:right;">{len(zones.get('fvg_bullish',[]))} zones</b><br>
+                <span style="color:#6b7a94;">FVG Bearish:</span>
+                <b style="color:#ff4d6a;float:right;">{len(zones.get('fvg_bearish',[]))} zones</b><br>
+                <span style="color:#6b7a94;">OB Buy:</span>
+                <b style="color:#00d4aa;float:right;">{zones.get('ob_buy') or '—'}</b><br>
+                <span style="color:#6b7a94;">OB Sell:</span>
+                <b style="color:#ff4d6a;float:right;">{zones.get('ob_sell') or '—'}</b>
+            </div>
+        </div>""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+#  TAB 3 — MULTI-TF
+# ══════════════════════════════════════════════════════════════
+with tab3:
+    mc3 = st.columns(3)
+    for col, tf_n in zip(mc3, ["H1","M15","M5"]):
+        d       = mtf.get(tf_n,{})
+        sig     = d.get("signal","WAIT")
+        cr      = d.get("corr",0.0)
+        tr      = d.get("trend","—")
+        at      = d.get("anticipation") or ""
+        bc3     = {"BUY":"badge-buy","SELL":"badge-sell","WAIT":"badge-wait"}.get(sig,"badge-wait")
+        at_html = f'<br><span style="color:#a78bfa;">{at}</span>' if at else ""
+        cc  = C["green"] if cr<-0.6 else (C["gold"] if cr<0 else C["red"])
+        with col:
+            st.markdown(f"""
+            <div class="card" style="text-align:center;">
+                <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1rem;
+                            color:#dde3ee;margin-bottom:8px;">{tf_n}</div>
+                <div style="margin-bottom:8px;"><span class="{bc3}">{sig}</span></div>
+                <div style="font-size:.67rem;color:#6b7a94;line-height:2.0;text-align:left;">
+                    Corr: <b style="color:{cc};float:right;">{cr:+.4f}</b><br>
+                    Trend: <b style="color:#dde3ee;float:right;">{tr}</b>
+                    {at_html}
+                </div>
+            </div>""", unsafe_allow_html=True)
+
+    sigs  = [mtf.get(t,{}).get("signal","WAIT") for t in ["H1","M15","M5"]]
+    buys  = sigs.count("BUY"); sells = sigs.count("SELL")
+    if buys>=2:   cons,cc2 = "🟢 CONSENSUS BUY — Setup favorable",  C["green"]
+    elif sells>=2: cons,cc2 = "🔴 CONSENSUS SELL — Setup favorable", C["red"]
+    else:          cons,cc2 = "⚪ PAS DE CONSENSUS — Attendre",       C["gold"]
+    st.markdown(f"""
+    <div style="background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.06);
+                border-radius:10px;padding:14px;text-align:center;margin-top:10px;">
+        <div style="font-size:.72rem;color:{cc2};font-weight:700;">{cons}</div>
+        <div style="font-size:.6rem;color:#2e3a4e;margin-top:4px;">
+            H1:{sigs[0]} · M15:{sigs[1]} · M5:{sigs[2]}
+        </div>
+    </div>""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+#  TAB 4 — LOGS
+# ══════════════════════════════════════════════════════════════
+with tab4:
+    lc1, lc2 = st.columns([3,1])
+    with lc1:
+        st.markdown('<div class="lbl">Logs Temps Réel</div>', unsafe_allow_html=True)
+    with lc2:
+        lf = st.selectbox("Filtre logs", ["ALL","SIGNAL","WARNING","ERROR"],
+                           label_visibility="collapsed")
+
+    logs = ss.bot_logs
+    filtered = [l for l in reversed(logs) if lf=="ALL" or l.get("level")==lf]
+    html  = '<div style="background:#0d1117;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:12px;height:310px;overflow-y:auto;font-size:.63rem;line-height:1.9;">'
+    for e in filtered[:80]:
+        lvl = e.get("level","INFO").upper()
+        col = {"INFO":"#6b7a94","WARNING":"#f7b529","ERROR":"#ff4d6a","SIGNAL":"#00d4aa"}.get(lvl,"#6b7a94")
+        html += (f'<div><span style="color:#2e3a4e;">{e.get("time","")}</span>'
+                 f' <span style="color:{col};font-weight:600;">[{lvl}]</span>'
+                 f' <span style="color:#9ca3af;">{e.get("msg","")}</span></div>')
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+    bs  = {"running":("🟢",C["green"],"Bot actif"),
+           "simulation":("🟡",C["gold"],"Simulation"),
+           "starting":("🔵",C["blue"] if "blue" in C else "#4da6ff","Démarrage")}
+    em,sc,sl = bs.get(ss.bot_status,("⚪",C["text"],"Inconnu"))
+    st.markdown(f"""<div style="margin-top:8px;font-size:.67rem;color:{sc};">
+        {em} {sl} · MT5:{'✅' if mt5_ok else '⚠️'} · WS:{'🟣' if ws_ok else '🔴'}
+        · Màj:{str(ss.last_update)[:19] if ss.last_update and ss.last_update!='—' else '—'}
+    </div>""", unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+#  TAB 5 — HISTORIQUE
+# ══════════════════════════════════════════════════════════════
+with tab5:
+    h1,h2,h3,h4 = st.columns(4)
+    with h1: st.metric("Total",     len(ss.signals))
+    with h2: st.metric("Winrate",   f"{ss.winrate}%")
+    with h3: st.metric("Victoires", ss.wins)
+    with h4: st.metric("Défaites",  ss.losses)
+    st.markdown("")
+
+    if ss.signals:
+        df_s  = pd.DataFrame(ss.signals[::-1][-50:])
+        cols  = [c for c in ["time","direction","tf","entry","tp","sl","rr","sl_source","result"]
+                 if c in df_s.columns]
+        def _sty(val):
+            m = {"BUY":"color:#00d4aa;font-weight:700","SELL":"color:#ff4d6a;font-weight:700",
+                 "WIN":"color:#00d4aa","LOSS":"color:#ff4d6a"}
+            return m.get(str(val),"color:#6b7a94")
+        try:
+            sub   = [c for c in ["direction","result"] if c in cols]
+            styled = df_s[cols].style.map(_sty, subset=sub)
+            try:    st.dataframe(styled, width="stretch", height=290)
+            except: st.dataframe(styled, use_container_width=True, height=290)
+        except:
+            try:    st.dataframe(df_s[cols], width="stretch", height=290)
+            except: st.dataframe(df_s[cols], use_container_width=True, height=290)
+    else:
+        st.markdown("""<div style="text-align:center;padding:40px;color:#2e3a4e;font-size:.75rem;">
+            Aucun signal enregistré. Lance le bot + api_server.py.
+        </div>""", unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  FOOTER
+# ─────────────────────────────────────────────────────────────────────────────
+
+st.markdown(f"""
+<div style="text-align:center;padding:6px 0 2px;font-size:.52rem;color:#1e293b;
+            border-top:1px solid rgba(255,255,255,0.04);margin-top:6px;">
+    Gold/DXY Pro v3.1 · {'🟣 WebSocket' if ws_ok else '🟡 HTTP'} · Tick #{ss.tick} · {API_URL[:40]}
+</div>
+""", unsafe_allow_html=True)
+
+# ── Auto-refresh ──────────────────────────────────────────────────────────────
+# REFRESH_S à 1.5s → suffisamment lent pour que Plotly mette à jour
+# en place sans recréer le DOM (= zéro flash)
+time.sleep(REFRESH_S)
+st.rerun()
