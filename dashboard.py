@@ -1,11 +1,8 @@
-
-Copier
-
 """
 GOLD/DXY PRO — Dashboard v4
 Fixes : graphes uniques · pas de flash · prix compact · sidebar fixe
 """
- 
+
 import os, time, json, threading, queue
 import numpy as np
 import pandas as pd
@@ -14,53 +11,53 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
- 
+
 try:
     import requests as _req
     HAS_REQ = True
 except ImportError:
     HAS_REQ = False
- 
+
 try:
     import websocket as _ws
     HAS_WS = True
 except ImportError:
     HAS_WS = False
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  PAGE CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 st.set_page_config(
     page_title="GOLD/DXY Pro",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="expanded",
 )
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 try:
     API_URL = st.secrets["API_URL"]
     API_KEY = st.secrets["API_KEY"]
 except Exception:
     API_URL = os.getenv("API_URL", "http://localhost:8000")
     API_KEY = os.getenv("API_KEY", "gold_dxy_secret_2024")
- 
+
 WS_URL       = API_URL.replace("https://","wss://").replace("http://","ws://") + f"/ws?api_key={API_KEY}"
 HTTP_HEADERS = {"X-API-Key": API_KEY}
 REFRESH_S    = 2.5   # rerun toutes les 2.5s — assez lent pour zéro flash
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  CSS GLOBAL
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Syne:wght@700;800&display=swap');
- 
+
 :root {
     --bg:#080b0f; --bg2:#0d1117;
     --glass:rgba(255,255,255,0.03);
@@ -71,7 +68,7 @@ st.markdown("""
     --mono:'JetBrains Mono',monospace;
     --display:'Syne',sans-serif;
 }
- 
+
 /* ── Base ── */
 html,body,[class*="css"] {
     font-family:var(--mono)!important;
@@ -82,11 +79,11 @@ html,body,[class*="css"] {
     padding:0.4rem 0.9rem 1rem!important;
     max-width:100%!important;
 }
- 
+
 /* ── Masquer chrome Streamlit ── */
 #MainMenu,footer,header,.stDeployButton,
 [data-testid="stToolbar"] { display:none!important; }
- 
+
 /* ── SIDEBAR forcée visible ── */
 [data-testid="stSidebar"] {
     background:linear-gradient(180deg,#0c1018,#080b0f)!important;
@@ -108,7 +105,7 @@ button[kind="headerNoPadding"],
     transform:none!important;
     margin-left:0!important;
 }
- 
+
 /* ── Onglets ── */
 .stTabs [data-baseweb="tab-list"] {
     background:var(--glass)!important;
@@ -128,7 +125,7 @@ button[kind="headerNoPadding"],
 /* Flèche de scroll des tabs */
 [data-testid="stTabScrollRight"],
 [data-testid="stTabScrollLeft"] { display:none!important; }
- 
+
 /* ── Metrics COMPACTS — une seule ligne ── */
 [data-testid="metric-container"] {
     background:var(--glass)!important;
@@ -146,7 +143,7 @@ button[kind="headerNoPadding"],
     line-height:1.2!important;
 }
 [data-testid="stMetricDelta"] { font-size:.6rem!important; }
- 
+
 /* ── Radio ── */
 .stRadio > div { gap:4px!important; }
 .stRadio label {
@@ -155,44 +152,44 @@ button[kind="headerNoPadding"],
     font-size:.7rem!important; color:var(--muted)!important; cursor:pointer!important;
 }
 .stRadio label:hover { border-color:rgba(247,181,41,.4)!important; color:var(--gold)!important; }
- 
+
 /* ── Plotly — anti-flash ── */
 .js-plotly-plot { border-radius:8px!important; overflow:hidden!important; }
 /* Éviter le blanc/flash au rerun */
 .element-container:has(iframe) { min-height:0!important; }
- 
+
 /* ── Scrollbar ── */
 ::-webkit-scrollbar { width:3px; height:3px; }
 ::-webkit-scrollbar-thumb { background:var(--border); border-radius:2px; }
- 
+
 /* ── Cards ── */
 .card {
     background:var(--glass); border:1px solid var(--border);
     border-radius:9px; padding:11px 13px; margin-bottom:8px;
 }
- 
+
 /* ── Badges ── */
 .bb  { display:inline-block; background:rgba(0,212,170,.15); border:1px solid rgba(0,212,170,.4); color:#00d4aa; border-radius:4px; padding:1px 8px; font-size:.65rem; font-weight:700; }
 .bs  { display:inline-block; background:rgba(255,77,106,.15); border:1px solid rgba(255,77,106,.4); color:#ff4d6a; border-radius:4px; padding:1px 8px; font-size:.65rem; font-weight:700; }
 .bw  { display:inline-block; background:rgba(107,122,148,.1); border:1px solid rgba(107,122,148,.25); color:#6b7a94; border-radius:4px; padding:1px 8px; font-size:.65rem; font-weight:700; }
 .ba  { display:inline-block; background:rgba(167,139,250,.12); border:1px solid rgba(167,139,250,.4); color:#a78bfa; border-radius:4px; padding:1px 8px; font-size:.62rem; font-weight:700; }
- 
+
 /* ── Status dots ── */
 .dot-g { display:inline-block;width:6px;height:6px;background:#00d4aa;border-radius:50%;box-shadow:0 0 5px #00d4aa;animation:p 1.4s infinite;margin-right:4px; }
 .dot-r { display:inline-block;width:6px;height:6px;background:#ff4d6a;border-radius:50%;margin-right:4px; }
 .dot-p { display:inline-block;width:6px;height:6px;background:#a78bfa;border-radius:50%;box-shadow:0 0 5px #a78bfa;animation:p 1.2s infinite;margin-right:4px; }
 .dot-y { display:inline-block;width:6px;height:6px;background:#f7b529;border-radius:50%;margin-right:4px; }
 @keyframes p { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.3;transform:scale(1.5)} }
- 
+
 .lbl { font-size:.55rem;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);margin-bottom:3px; }
 hr { border-color:var(--border)!important; margin:7px 0!important; }
 </style>
 """, unsafe_allow_html=True)
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONSTANTES
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 C = {
     "bg":"#080b0f","bg2":"#0d1117",
     "grid":"rgba(255,255,255,0.03)",
@@ -200,11 +197,11 @@ C = {
     "gold":"#f7b529","dxy":"#4da6ff",
     "green":"#00d4aa","red":"#ff4d6a",
 }
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  SESSION STATE
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 _D = {
     "tick":0,"ws_connected":False,
     "ws_queue":None,"ws_thread":None,"ws_stop":None,
@@ -231,13 +228,13 @@ _D = {
 for k,v in _D.items():
     if k not in st.session_state:
         st.session_state[k] = v
- 
+
 ss = st.session_state  # alias global
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  WEBSOCKET THREAD
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 def _ws_fn(q, stop):
     if not HAS_WS:
         q.put({"type":"_ws_status","connected":False})
@@ -262,8 +259,8 @@ def _ws_fn(q, stop):
             q.put({"type":"_ws_status","connected":False,"error":str(e)})
         if not stop.is_set():
             time.sleep(delay); delay = min(delay*1.5, 20)
- 
- 
+
+
 def _start_ws():
     if ss.ws_thread and ss.ws_thread.is_alive():
         return
@@ -272,13 +269,13 @@ def _start_ws():
     t = threading.Thread(target=_ws_fn, args=(q,stop), daemon=True)
     t.start()
     ss.ws_queue=q; ss.ws_thread=t; ss.ws_stop=stop
- 
+
 _start_ws()
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  TRAITEMENT WS MESSAGES
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 def _snap(d):
     for k in ["gold_price","dxy_price","gold_bid","gold_ask","gold_change",
               "gold_pct","dxy_change","correlation","corr_history","signal",
@@ -289,8 +286,8 @@ def _snap(d):
     if "ohlcv" in d:
         for tf,c in d["ohlcv"].items():
             if c: ss.ohlcv[tf] = c
- 
- 
+
+
 def _process_ws():
     q = ss.ws_queue
     if not q: return
@@ -328,12 +325,12 @@ def _process_ws():
             if msg.get("zones"): ss.zones = msg["zones"]
         elif t == "logs":
             if msg.get("logs"): ss.bot_logs = msg["logs"]
- 
- 
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  HTTP FALLBACK + SIMULATION
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 @st.cache_data(ttl=3)
 def _http():
     if not HAS_REQ: return None
@@ -341,8 +338,8 @@ def _http():
         r = _req.get(f"{API_URL}/api/snapshot", headers=HTTP_HEADERS, timeout=3)
         return r.json() if r.status_code==200 else None
     except: return None
- 
- 
+
+
 def _sim():
     np.random.seed(int(time.time()) % 9999)
     if ss.gold_price == 0: ss.gold_price=2320.0; ss.dxy_price=104.5
@@ -355,8 +352,8 @@ def _sim():
     ss.gold_bid    = round(ss.gold_price-.15,2)
     ss.gold_ask    = round(ss.gold_price+.15,2)
     ss.bot_status  = "simulation"
- 
- 
+
+
 def _sim_ohlcv(n,interval_min,sym):
     np.random.seed(hash(sym)%9999)
     base=2320. if "XAU" in sym.upper() else 104.5
@@ -375,18 +372,18 @@ def _sim_ohlcv(n,interval_min,sym):
                      "low":round(max(l,.1),5),"close":round(c,5),
                      "volume":int(np.random.exponential(2000))})
     return out
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  BUILDERS GRAPHES
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 def _df(candles):
     if not candles: return pd.DataFrame()
     df=pd.DataFrame(candles)
     df["time"]=pd.to_datetime(df["time"])
     return df
- 
- 
+
+
 def _zones_on(fig, zones, row=1):
     s=zones.get("support",0); r=zones.get("resistance",0)
     if s: fig.add_hline(y=s,row=row,col=1,line=dict(color="rgba(0,212,170,.4)",width=1,dash="dot"),annotation_text="S",annotation_font=dict(color="#00d4aa",size=8))
@@ -397,12 +394,12 @@ def _zones_on(fig, zones, row=1):
     if ob: fig.add_hline(y=ob,row=row,col=1,line=dict(color="rgba(0,212,170,.6)",width=1.2),annotation_text="OB↑",annotation_font=dict(color="#00d4aa",size=8))
     ob=zones.get("ob_sell")
     if ob: fig.add_hline(y=ob,row=row,col=1,line=dict(color="rgba(255,77,106,.6)",width=1.2),annotation_text="OB↓",annotation_font=dict(color="#ff4d6a",size=8))
- 
- 
+
+
 def build_chart(candles, symbol, color, tf, signal=None, zones=None, show_zones=True):
     df = _df(candles)
     tf_lbl = {"M5":"5 Min","M15":"15 Min","H1":"1 Hour"}.get(tf,tf)
- 
+
     if df.empty:
         fig=go.Figure()
         fig.update_layout(paper_bgcolor=C["bg2"],plot_bgcolor=C["bg"],height=380,
@@ -410,10 +407,10 @@ def build_chart(candles, symbol, color, tf, signal=None, zones=None, show_zones=
         fig.add_annotation(text="⏳ En attente…",xref="paper",yref="paper",
                             x=.5,y=.5,font=dict(color=C["text"],size=12),showarrow=False)
         return fig
- 
+
     fig=make_subplots(rows=2,cols=1,shared_xaxes=True,
                        vertical_spacing=.012,row_heights=[.8,.2])
- 
+
     # Candles
     fig.add_trace(go.Candlestick(
         x=df["time"],open=df["open"],high=df["high"],low=df["low"],close=df["close"],
@@ -422,7 +419,7 @@ def build_chart(candles, symbol, color, tf, signal=None, zones=None, show_zones=
         decreasing=dict(line=dict(color=C["red"],  width=1),fillcolor=C["red"]),
         whiskerwidth=.18,
     ),row=1,col=1)
- 
+
     # EMAs
     e20=df["close"].ewm(span=20).mean()
     e50=df["close"].ewm(span=50).mean()
@@ -430,11 +427,11 @@ def build_chart(candles, symbol, color, tf, signal=None, zones=None, show_zones=
         line=dict(color=color,width=1,dash="dot"),opacity=.65),row=1,col=1)
     fig.add_trace(go.Scatter(x=df["time"],y=e50,name="EMA50",
         line=dict(color="rgba(255,255,255,.16)",width=.8),opacity=.5),row=1,col=1)
- 
+
     # Zones
     if show_zones and zones:
         _zones_on(fig,zones,row=1)
- 
+
     # Prix live
     lp=float(df["close"].iloc[-1])
     fig.add_hline(y=lp,row=1,col=1,line=dict(color=color,width=.7,dash="dash"),opacity=.4)
@@ -444,7 +441,7 @@ def build_chart(candles, symbol, color, tf, signal=None, zones=None, show_zones=
         showarrow=False,xanchor="left",
         bgcolor="rgba(8,11,15,.9)",bordercolor=color,borderwidth=1,borderpad=2,
         row=1,col=1)
- 
+
     # Signal marker
     if signal and signal.get("direction") in ("BUY","SELL"):
         lt=df["time"].iloc[-1]
@@ -462,11 +459,11 @@ def build_chart(candles, symbol, color, tf, signal=None, zones=None, show_zones=
             fig.add_hline(y=signal["tp"],row=1,col=1,line=dict(color=C["green"],width=.7,dash="dash"),opacity=.5)
         if signal.get("sl"):
             fig.add_hline(y=signal["sl"],row=1,col=1,line=dict(color=C["red"],  width=.7,dash="dash"),opacity=.5)
- 
+
     # Volume
     vc=[C["green"] if c>=o else C["red"] for c,o in zip(df["close"],df["open"])]
     fig.add_trace(go.Bar(x=df["time"],y=df["volume"],marker=dict(color=vc,opacity=.4),showlegend=False),row=2,col=1)
- 
+
     ax=dict(showgrid=True,gridcolor=C["grid"],gridwidth=1,zeroline=False,
             tickfont=dict(size=8,color=C["text"]),linecolor=C["grid"])
     fig.update_layout(
@@ -485,8 +482,8 @@ def build_chart(candles, symbol, color, tf, signal=None, zones=None, show_zones=
     fig.update_xaxes(**ax)
     fig.update_yaxes(**ax,tickformat=".5g")
     return fig
- 
- 
+
+
 def build_gauge(corr):
     col=C["green"] if corr<-.5 else (C["red"] if corr>.5 else C["gold"])
     fig=go.Figure(go.Indicator(
@@ -503,8 +500,8 @@ def build_gauge(corr):
     ))
     fig.update_layout(paper_bgcolor=C["bg2"],height=140,margin=dict(l=8,r=8,t=22,b=4))
     return fig
- 
- 
+
+
 def build_corr_hist(history):
     if not history: return go.Figure()
     fig=go.Figure()
@@ -522,29 +519,29 @@ def build_corr_hist(history):
         xaxis=dict(showgrid=False,tickfont=dict(size=7)),
     )
     return fig
- 
- 
+
+
 def _plt(fig, key, small=False):
     """Rendu Plotly — clé STABLE = pas de flash."""
     cfg={"displaylogo":False,"scrollZoom":not small,"displayModeBar":not small,
          "modeBarButtonsToRemove":["lasso2d","select2d","autoScale2d","toImage"] if not small else []}
     try:    st.plotly_chart(fig, width="stretch", config=cfg, key=key)
     except: st.plotly_chart(fig, use_container_width=True, config=cfg, key=key)
- 
- 
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  FETCH DATA
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 _process_ws()
- 
+
 if not ss.ws_connected:
     snap=_http()
     if snap: _snap(snap)
     else:    _sim()
- 
+
 ss.tick += 1
- 
+
 tf     = ss.tf
 tf_min = {"M5":5,"M15":15,"H1":60}[tf]
 gold_c = ss.ohlcv.get(tf,[]) or _sim_ohlcv(200,tf_min,"XAUUSD")
@@ -556,11 +553,11 @@ ws_ok  = ss.ws_connected
 mt5_ok = ss.mt5_connected
 sig_dir= signal.get("direction","WAIT")
 ant    = signal.get("anticipation") or ""
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  SIDEBAR
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 with st.sidebar:
     st.markdown("""
     <div style="padding:10px 0 12px;">
@@ -573,17 +570,17 @@ with st.sidebar:
             Algo Trading Dashboard
         </div>
     </div>""", unsafe_allow_html=True)
- 
+
     st.markdown('<div class="lbl">Timeframe</div>', unsafe_allow_html=True)
     tf_sel = st.radio("TF",["M5","M15","H1"],horizontal=True,
                        label_visibility="collapsed",
                        index=["M5","M15","H1"].index(ss.tf))
     if tf_sel != ss.tf: ss.tf = tf_sel
- 
+
     st.markdown('<div class="lbl" style="margin-top:10px;">Affichage</div>', unsafe_allow_html=True)
     show_zones = st.checkbox("S/R · FVG · Order Blocks", value=ss.show_zones)
     ss.show_zones = show_zones
- 
+
     st.markdown('<div class="lbl" style="margin-top:10px;">FVG Strength</div>', unsafe_allow_html=True)
     fvg_s = st.select_slider("FVG",options=["Faible","Normal","Fort"],value="Normal",label_visibility="collapsed")
     atr_v = zones.get("atr",0)
@@ -591,9 +588,9 @@ with st.sidebar:
     n_fvg = len(zones.get("fvg_bullish",[]))+len(zones.get("fvg_bearish",[]))
     st.markdown(f'<div style="font-size:.56rem;color:#3d4a5e;margin-top:2px;">ATR×{mult} · {n_fvg} zones</div>',
                 unsafe_allow_html=True)
- 
+
     st.markdown("---")
- 
+
     # Connexion
     d1  = "dot-p" if ws_ok  else "dot-r"
     d2  = "dot-g" if mt5_ok else "dot-y"
@@ -609,29 +606,29 @@ with st.sidebar:
         </div>
         <div style="font-size:.54rem;color:#2e3a4e;margin-top:4px;">{url_short}</div>
     </div>""", unsafe_allow_html=True)
- 
+
     st.markdown("")
     c1,c2=st.columns(2)
     with c1: st.metric("Winrate",f"{ss.winrate}%")
     with c2: st.metric("Trades", f"{ss.wins}W/{ss.losses}L")
- 
+
     st.markdown(f"""
     <div style="font-size:.54rem;color:#2e3a4e;text-align:center;margin-top:8px;line-height:1.8;">
         {ss.gold_symbol} · {tf} · Tick#{ss.tick}<br>
         {datetime.now().strftime('%H:%M:%S')}
     </div>""", unsafe_allow_html=True)
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  HEADER — compact, ne cache pas les graphes
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 bc_map = {"BUY":"bb","SELL":"bs","WAIT":"bw"}
 bc = bc_map[sig_dir]
 ant_html = f'<span class="ba">{ant}</span>' if ant else ""
 ws_lbl   = "WS Live" if ws_ok else "HTTP"
 ws_col   = "#a78bfa" if ws_ok else "#f7b529"
 dot_ws   = "dot-p" if ws_ok else "dot-r"
- 
+
 # Header en UNE seule ligne compacte
 st.markdown(f"""
 <div style="display:flex;align-items:center;justify-content:space-between;
@@ -664,11 +661,11 @@ st.markdown(f"""
     </div>
 </div>
 """, unsafe_allow_html=True)
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  METRICS — compactes sur 7 colonnes
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 m = st.columns(7)
 with m[0]: st.metric("XAUUSD",     f"{ss.gold_price:,.2f}",  f"{ss.gold_change:+.2f}({ss.gold_pct:+.2f}%)")
 with m[1]: st.metric("DXY",        f"{ss.dxy_price:.3f}",    f"{ss.dxy_change:+.4f}")
@@ -680,13 +677,13 @@ with m[4]: st.metric("Winrate",    f"{ss.winrate}%",          f"{ss.wins}W/{ss.l
 with m[5]: st.metric("BID/ASK",    f"{ss.gold_bid:.2f}",      f"ASK {ss.gold_ask:.2f}")
 with m[6]:
     st.metric("R/R",f"1:{signal.get('rr',0)}",f"SL:{signal.get('sl_source','—')}")
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  TABS
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 t1,t2,t3,t4,t5 = st.tabs(["📊 Graphiques","🎯 Signal & Zones","🔀 Multi-TF","📋 Logs","📜 Historique"])
- 
+
 # ══════════════════════════════════════════════════════════
 #  TAB 1 — GRAPHIQUES
 #  Clés stables → Plotly update en place → ZÉRO flash
@@ -701,7 +698,7 @@ with t1:
     with col_d:
         _plt(build_chart(dxy_c,"DXY",C["dxy"],tf),
               key="dxy_chart")    # clé fixe!
- 
+
     # Corrélation sous les graphes
     cc1,cc2 = st.columns([1,2])
     with cc1:
@@ -710,13 +707,13 @@ with t1:
         st.markdown('<div class="lbl" style="margin-top:4px;">Corrélation Rolling</div>',
                     unsafe_allow_html=True)
         _plt(build_corr_hist(ss.corr_history), key="corr_hist_tab1", small=True)
- 
+
 # ══════════════════════════════════════════════════════════
 #  TAB 2 — SIGNAL & ZONES
 # ══════════════════════════════════════════════════════════
 with t2:
     s1,s2,s3 = st.columns([1,1,1.2])
- 
+
     with s1:
         _plt(build_gauge(ss.correlation), key="gauge_tab2", small=True)
         if ss.correlation<-.65:   ic,it=C["green"],"✅ Forte — fiable"
@@ -724,7 +721,7 @@ with t2:
         else:                     ic,it=C["red"],  "❌ Faible — éviter"
         st.markdown(f'<div style="font-size:.65rem;color:{ic};background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05);border-radius:7px;padding:7px 9px;margin-top:4px;">{it}</div>',
                     unsafe_allow_html=True)
- 
+
     with s2:
         bc2     = bc_map[signal.get("direction","WAIT")]
         dir2    = signal.get("direction","WAIT")
@@ -746,7 +743,7 @@ with t2:
                 Pipeline: <b style="color:#dde3ee;">{pipe2}</b>
             </div>
         </div>""", unsafe_allow_html=True)
- 
+
         if dir2 in ("BUY","SELL"):
             entry=signal.get("entry",0);tp=signal.get("tp",0)
             sl=signal.get("sl",0);rr=signal.get("rr",0)
@@ -760,7 +757,7 @@ with t2:
                     <span style="color:#6b7a94;">R/R:</span><b style="color:#f7b529;float:right;">1:{rr}</b>
                 </div>
             </div>""", unsafe_allow_html=True)
- 
+
         if ant2:
             st.markdown(f"""
             <div style="background:rgba(167,139,250,.08);border:1px solid rgba(167,139,250,.3);
@@ -772,7 +769,7 @@ with t2:
                     ⏳ Attendre confirmation
                 </div>
             </div>""", unsafe_allow_html=True)
- 
+
     with s3:
         atr=zones.get("atr",0); ff=zones.get("fvg_filter",0)
         sup=zones.get("support",0); res=zones.get("resistance",0)
@@ -796,7 +793,7 @@ with t2:
                 <span style="color:#6b7a94;">OB Sell:</span><b style="color:#ff4d6a;float:right;">{ob_s or '—'}</b>
             </div>
         </div>""", unsafe_allow_html=True)
- 
+
 # ══════════════════════════════════════════════════════════
 #  TAB 3 — MULTI-TF
 # ══════════════════════════════════════════════════════════
@@ -819,7 +816,7 @@ with t3:
                     Trend: <b style="color:#dde3ee;float:right;">{tr}</b>{at_html}
                 </div>
             </div>""", unsafe_allow_html=True)
- 
+
     sigs=[mtf.get(t,{}).get("signal","WAIT") for t in ["H1","M15","M5"]]
     buys=sigs.count("BUY"); sells=sigs.count("SELL")
     if buys>=2:    cons,cc2="🟢 CONSENSUS BUY",C["green"]
@@ -831,7 +828,7 @@ with t3:
         <div style="font-size:.7rem;color:{cc2};font-weight:700;">{cons}</div>
         <div style="font-size:.58rem;color:#2e3a4e;margin-top:3px;">H1:{sigs[0]} · M15:{sigs[1]} · M5:{sigs[2]}</div>
     </div>""", unsafe_allow_html=True)
- 
+
 # ══════════════════════════════════════════════════════════
 #  TAB 4 — LOGS
 # ══════════════════════════════════════════════════════════
@@ -850,7 +847,7 @@ with t4:
     st.markdown(html, unsafe_allow_html=True)
     st.markdown(f'<div style="margin-top:6px;font-size:.62rem;color:{"#00d4aa" if ss.bot_status=="running" else "#f7b529"};">Bot:{ss.bot_status} · MT5:{"✅" if mt5_ok else "⚠️"} · WS:{"🟣" if ws_ok else "🔴"}</div>',
                 unsafe_allow_html=True)
- 
+
 # ══════════════════════════════════════════════════════════
 #  TAB 5 — HISTORIQUE
 # ══════════════════════════════════════════════════════════
@@ -877,15 +874,16 @@ with t5:
     else:
         st.markdown('<div style="text-align:center;padding:35px;color:#2e3a4e;font-size:.72rem;">Aucun signal enregistré.</div>',
                     unsafe_allow_html=True)
- 
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  FOOTER + RERUN
 # ─────────────────────────────────────────────────────────────────────────────
- 
+
 st.markdown(f"""
 <div style="text-align:center;padding:5px 0 2px;font-size:.5rem;color:#1a2234;
             border-top:1px solid rgba(255,255,255,.04);margin-top:6px;">
     Gold/DXY Pro v4 · {'🟣WS' if ws_ok else '🟡HTTP'} · Tick#{ss.tick} · {API_URL[:35]}
 </div>""", unsafe_allow_html=True)
- 
+
 time.sleep(REFRESH_S)
+st.rerun()
