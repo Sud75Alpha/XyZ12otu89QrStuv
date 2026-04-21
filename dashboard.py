@@ -228,6 +228,9 @@ _INIT: Dict = {
     "gold_symbol": "XAUUSD", "last_update": "—",
 }
 # 🔒 Sécurité supplémentaire
+
+ss = st.session_state  # ✅ ajoute cette ligne juste au-dessus
+
 if not isinstance(ss.signal, dict):
     ss.signal = {}
 
@@ -238,7 +241,6 @@ for k, v in _INIT.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
-ss = st.session_state  # ✅ ajoute cette ligne juste au-dessus
 
 if "signal" not in ss or not isinstance(ss.signal, dict):
     ss.signal = {
