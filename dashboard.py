@@ -36,12 +36,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-st.set_page_config(layout="wide")
 
-st.write("MAIN OK")
-
-st.sidebar.title("SIDEBAR TEST")
-st.sidebar.write("VISIBLE ?")
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG API
 # ─────────────────────────────────────────────────────────────────────────────
@@ -576,8 +571,6 @@ corr_data = _rolling_corr(gold_c, dxy_c, window=50)
 # ─────────────────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-
-    # Titre sidebar
     st.markdown("""
     <div style="padding:8px 0 12px;">
         <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1rem;
@@ -589,27 +582,13 @@ with st.sidebar:
             Algo Trading Dashboard
         </div>
     </div>""", unsafe_allow_html=True)
-
-    # ── Timeframe ──────────────────────────────────────────────────────────────
+ 
     st.markdown('<div class="lbl">Timeframe</div>', unsafe_allow_html=True)
-    options = ["M5", "M15", "H1"]
-
-    # 🔒 Sécurisation anti-crash
-    if ss.tf not in options:
-        ss.tf = "M5"
-
-    tf_sel = st.radio(
-        "TF",
-        options,
-        horizontal=True,
-        label_visibility="collapsed",
-        index=options.index(ss.tf)
-    )
-    if tf_sel != ss.tf: ss.tf = tf_sel
-
+    tf_sel=st.radio("TF",["M5","M15","H1"],horizontal=True,label_visibility="collapsed",index=["M5","M15","H1"].index(ss.tf))
+    if tf_sel!=ss.tf: ss.tf=tf_sel
+ 
     st.markdown("<hr>", unsafe_allow_html=True)
-
-    # ── Prix live ──────────────────────────────────────────────────────────────
+ 
     gc="#00d4aa" if ss.gold_change>=0 else "#ff4d6a"
     dc="#00d4aa" if ss.dxy_change >=0 else "#ff4d6a"
     st.markdown(f"""
@@ -623,11 +602,9 @@ with st.sidebar:
         <div style="font-size:1.1rem;font-weight:700;color:#4da6ff;">{ss.dxy_price:.3f}</div>
         <div style="font-size:.57rem;color:{dc};">{ss.dxy_change:+.4f}</div>
     </div>""", unsafe_allow_html=True)
-
-    # ── Signal ────────────────────────────────────────────────────────────────
-    conf  = signal.get("confidence",0)
-    pipe  = signal.get("pipeline_state","IDLE")
-    ant_h = f'<div style="margin-top:3px;"><span class="ba" style="font-size:.55rem;">{ant}</span></div>' if ant else ""
+ 
+    conf=signal.get("confidence",0); pipe=signal.get("pipeline_state","IDLE")
+    ant_h=f'<div style="margin-top:3px;"><span class="ba" style="font-size:.55rem;">{ant}</span></div>' if ant else ""
     st.markdown(f"""
     <div class="card card-gld">
         <div class="lbl">Signal</div>
@@ -639,8 +616,7 @@ with st.sidebar:
             <span style="color:#3d4a5e;">{pipe}</span>
         </div>
     </div>""", unsafe_allow_html=True)
-
-    # ── Corrélation ───────────────────────────────────────────────────────────
+ 
     cc="#00d4aa" if ss.correlation<-.6 else ("#f7b529" if ss.correlation<-.4 else "#ff4d6a")
     ct="✅ Forte" if ss.correlation<-.6 else ("⚠️ Modérée" if ss.correlation<-.4 else "❌ Faible")
     st.markdown(f"""
@@ -649,24 +625,16 @@ with st.sidebar:
         <div style="font-size:1rem;font-weight:700;color:{cc};">{ss.correlation:+.4f}</div>
         <div style="font-size:.55rem;color:{cc};margin-top:1px;">{ct}</div>
     </div>""", unsafe_allow_html=True)
-
+ 
     st.markdown("<hr>", unsafe_allow_html=True)
-
-    # ── Zones ─────────────────────────────────────────────────────────────────
     st.markdown('<div class="lbl">Affichage</div>', unsafe_allow_html=True)
-    ss.show_zones = st.checkbox("Zones (S/R · FVG · OB)", value=ss.show_zones)
-
-    st.markdown('<div class="lbl" style="margin-top:8px;">FVG Strength</div>',
-                unsafe_allow_html=True)
-    fvg_s = st.select_slider("FVG",options=["Faible","Normal","Fort"],
-                               value="Normal",label_visibility="collapsed")
-    n_fvg = len(zones.get("fvg_bullish",[]))+len(zones.get("fvg_bearish",[]))
-    st.markdown(f'<div style="font-size:.52rem;color:#3d4a5e;">{n_fvg} FVG · ATR={zones.get("atr",0):.2f}</div>',
-                unsafe_allow_html=True)
-
+    ss.show_zones=st.checkbox("Zones (S/R · FVG · OB)",value=ss.show_zones)
+    st.markdown('<div class="lbl" style="margin-top:8px;">FVG Strength</div>',unsafe_allow_html=True)
+    fvg_s=st.select_slider("FVG",options=["Faible","Normal","Fort"],value="Normal",label_visibility="collapsed")
+    n_fvg=len(zones.get("fvg_bullish",[]))+len(zones.get("fvg_bearish",[]))
+    st.markdown(f'<div style="font-size:.52rem;color:#3d4a5e;">{n_fvg} FVG · ATR={zones.get("atr",0):.2f}</div>',unsafe_allow_html=True)
+ 
     st.markdown("<hr>", unsafe_allow_html=True)
-
-    # ── Connexion ─────────────────────────────────────────────────────────────
     dws="dp" if ws_ok else "dr"; dmt5="dg" if mt5_ok else "dy"
     url_s=API_URL[:26]+("…" if len(API_URL)>26 else "")
     st.markdown(f"""
@@ -679,17 +647,12 @@ with st.sidebar:
         </div>
         <div style="font-size:.5rem;color:#2e3a4e;margin-top:3px;">{url_s}</div>
     </div>""", unsafe_allow_html=True)
-
+ 
     st.markdown("<hr>", unsafe_allow_html=True)
-
     c1,c2=st.columns(2)
     with c1: st.metric("Winrate",f"{ss.winrate}%")
     with c2: st.metric("Trades", f"{ss.wins}W/{ss.losses}L")
-
-    st.markdown(f"""
-    <div style="font-size:.49rem;color:#2e3a4e;text-align:center;margin-top:7px;line-height:2;">
-        {ss.gold_symbol} · {tf} · #{ss.tick}<br>{datetime.now().strftime('%H:%M:%S')}
-    </div>""", unsafe_allow_html=True)
+    st.markdown(f'<div style="font-size:.49rem;color:#2e3a4e;text-align:center;margin-top:7px;line-height:2;">{ss.gold_symbol} · {tf} · #{ss.tick}<br>{datetime.now().strftime("%H:%M:%S")}</div>',unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONTENU PRINCIPAL
