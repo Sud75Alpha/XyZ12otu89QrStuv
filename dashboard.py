@@ -36,13 +36,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-st.sidebar.title("TEST SIDEBAR")
-st.sidebar.write("Si tu vois ça → sidebar OK")
-st.sidebar.title("⚡ SIDEBAR ACTIF")
-st.sidebar.write("Test visible")
-st.sidebar.success("OK")
-st.sidebar.write("SIDEBAR TEST 123")
+st.set_page_config(layout="wide")
+
 st.write("MAIN OK")
+
+st.sidebar.title("SIDEBAR TEST")
+st.sidebar.write("VISIBLE ?")
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG API
 # ─────────────────────────────────────────────────────────────────────────────
@@ -61,7 +60,7 @@ REFRESH_S    = 3
 # ─────────────────────────────────────────────────────────────────────────────
 #  CSS GLOBAL
 # ─────────────────────────────────────────────────────────────────────────────
-
+/*
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Syne:wght@700;800&display=swap');
@@ -184,7 +183,7 @@ hr   { border-color: var(--border) !important; margin: 7px 0 !important; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 </style>
 """, unsafe_allow_html=True)
-
+*/
 # ─────────────────────────────────────────────────────────────────────────────
 #  COULEURS PLOTLY
 # ─────────────────────────────────────────────────────────────────────────────
