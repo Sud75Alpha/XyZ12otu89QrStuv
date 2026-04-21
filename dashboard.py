@@ -323,7 +323,7 @@ def _plt(fig,key,small=False):
     cfg={"displaylogo":False,"scrollZoom":not small,"displayModeBar":not small,"modeBarButtonsToRemove":["lasso2d","select2d","autoScale2d"]}
     try:    st.plotly_chart(fig,width="stretch",config=cfg,key=key)
     except: st.plotly_chart(fig,use_container_width=True,config=cfg,key=key)
-
+st.write(zones)
 # ─── FETCH DONNÉES ────────────────────────────────────────────────────────────
 _process_ws()
 if not ss.ws_connected:
