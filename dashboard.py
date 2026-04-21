@@ -40,7 +40,8 @@ st.sidebar.title("TEST SIDEBAR")
 st.sidebar.write("Si tu vois ça → sidebar OK")
 st.sidebar.title("⚡ SIDEBAR ACTIF")
 st.sidebar.write("Test visible")
-st.sidebar.success("OK")st.sidebar.write("SIDEBAR TEST 123")
+st.sidebar.success("OK")
+st.sidebar.write("SIDEBAR TEST 123")
 st.write("MAIN OK")
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG API
