@@ -231,12 +231,7 @@ _INIT: Dict = {
 
 ss = st.session_state  # ✅ ajoute cette ligne juste au-dessus
 
-if not isinstance(ss.signal, dict):
-    ss.signal = {}
 
-if not isinstance(ss.zones, dict):
-    ss.zones = {}
-    
 for k, v in _INIT.items():
     if k not in st.session_state:
         st.session_state[k] = v
