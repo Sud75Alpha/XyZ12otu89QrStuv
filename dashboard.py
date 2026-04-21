@@ -241,11 +241,14 @@ def _rolling_corr(gold_c,dxy_c,window=50):
     return out
 
 # ─── BUILDERS GRAPHES ────────────────────────────────────────────────────────
-def _to_df(candles):
+def _to_df(candles: List[dict]) -> pd.DataFrame:
     if not candles: return pd.DataFrame()
-    df=pd.DataFrame(candles); df["time"]=pd.to_datetime(df["time"]); return df
+    df=pd.DataFrame(candles)
+    df["time"]=pd.to_datetime(df["time"])
+    return df
 
-def _draw_zones(fig,z,row=1):
+
+def _draw_zones(fig, z: dict, row:int=1):
     s=z.get("support",0); r=z.get("resistance",0)
     if s: fig.add_hline(y=s,row=row,col=1,line=dict(color="rgba(0,212,170,.45)",width=1,dash="dot"),annotation_text="S",annotation_font=dict(color="#00d4aa",size=8))
     if r: fig.add_hline(y=r,row=row,col=1,line=dict(color="rgba(255,77,106,.45)",width=1,dash="dot"),annotation_text="R",annotation_font=dict(color="#ff4d6a",size=8))
@@ -255,11 +258,16 @@ def _draw_zones(fig,z,row=1):
     if ob_b: fig.add_hline(y=ob_b,row=row,col=1,line=dict(color="rgba(0,212,170,.65)",width=1.2),annotation_text="OB↑",annotation_font=dict(color="#00d4aa",size=8))
     if ob_s: fig.add_hline(y=ob_s,row=row,col=1,line=dict(color="rgba(255,77,106,.65)",width=1.2),annotation_text="OB↓",annotation_font=dict(color="#ff4d6a",size=8))
 
-def build_candle(candles,symbol,color,tf,signal=None,zones=None,show_zones=True):
-    df=_to_df(candles); tf_lbl={"M5":"5 Min","M15":"15 Min","H1":"1 Hour"}.get(tf,tf)
+
+def build_candle(candles:List[dict], symbol:str, color:str, tf:str,
+                 signal:dict=None, zones:dict=None, show_zones:bool=True) -> go.Figure:
+    df=_to_df(candles)
+    tf_lbl={"M5":"5 Min","M15":"15 Min","H1":"1 Hour"}.get(tf,tf)
     if df.empty:
-        fig=go.Figure(); fig.update_layout(paper_bgcolor=C["bg2"],plot_bgcolor=C["bg"],height=360,margin=dict(l=0,r=8,t=26,b=0))
-        fig.add_annotation(text="⏳ En attente…",xref="paper",yref="paper",x=.5,y=.5,font=dict(color=C["text"],size=12),showarrow=False); return fig
+        fig=go.Figure()
+        fig.update_layout(paper_bgcolor=C["bg2"],plot_bgcolor=C["bg"],height=360,margin=dict(l=0,r=8,t=26,b=0))
+        fig.add_annotation(text="⏳ En attente…",xref="paper",yref="paper",x=.5,y=.5,font=dict(color=C["text"],size=12),showarrow=False)
+        return fig
     fig=make_subplots(rows=2,cols=1,shared_xaxes=True,vertical_spacing=.01,row_heights=[.8,.2])
     fig.add_trace(go.Candlestick(x=df["time"],open=df["open"],high=df["high"],low=df["low"],close=df["close"],name=symbol,
         increasing=dict(line=dict(color=C["green"],width=1),fillcolor=C["green"]),
@@ -280,68 +288,70 @@ def build_candle(candles,symbol,color,tf,signal=None,zones=None,show_zones=True)
     vc=[C["green"] if c>=o else C["red"] for c,o in zip(df["close"],df["open"])]
     fig.add_trace(go.Bar(x=df["time"],y=df["volume"],marker=dict(color=vc,opacity=.4),showlegend=False),row=2,col=1)
     ax=dict(showgrid=True,gridcolor=C["grid"],gridwidth=1,zeroline=False,tickfont=dict(size=8,color=C["text"]),linecolor=C["grid"])
-    fig.update_layout(paper_bgcolor=C["bg2"],plot_bgcolor=C["bg"],margin=dict(l=0,r=8,t=28,b=0),height=360,
+    fig.update_layout(
+        paper_bgcolor=C["bg2"],plot_bgcolor=C["bg"],
+        margin=dict(l=0,r=8,t=28,b=0),height=360,
         font=dict(family="JetBrains Mono",color=C["text"],size=8),
         legend=dict(orientation="h",x=0,y=1.1,bgcolor="rgba(0,0,0,0)",font=dict(size=8)),
         hovermode="x unified",xaxis_rangeslider_visible=False,
         title=dict(text=(f'<b style="color:{color}">{symbol}</b>'
                           f'<span style="color:{C["dim"]};font-size:8px"> ● {tf_lbl}</span>'
                           f'  <span style="color:{color};font-weight:700"> {lp:,.2f}</span>'),
-                    x=.01,font=dict(size=11,family="Syne")),dragmode="pan")
-    fig.update_xaxes(**ax); fig.update_yaxes(**ax,tickformat=".5g"); return fig
+                    x=.01,font=dict(size=11,family="Syne")),
+        dragmode="pan",
+    )
+    fig.update_xaxes(**ax); fig.update_yaxes(**ax,tickformat=".5g")
+    return fig
 
-def build_gauge(corr):
+
+def build_gauge(corr:float) -> go.Figure:
     col=C["green"] if corr<-.5 else (C["red"] if corr>.5 else C["gold"])
     fig=go.Figure(go.Indicator(mode="gauge+number",value=corr,
         number=dict(font=dict(size=24,color=col,family="JetBrains Mono")),
         gauge=dict(axis=dict(range=[-1,1],tickfont=dict(size=7),nticks=9,tickcolor=C["text"]),
             bar=dict(color=col,thickness=.18),bgcolor=C["bg"],bordercolor=C["grid"],borderwidth=1,
-            steps=[dict(range=[-1,-.6],color="rgba(0,212,170,.08)"),dict(range=[-.6,.6],color="rgba(247,181,41,.04)"),dict(range=[.6,1],color="rgba(255,77,106,.08)")]),
+            steps=[dict(range=[-1,-.6],color="rgba(0,212,170,.08)"),
+                   dict(range=[-.6,.6], color="rgba(247,181,41,.04)"),
+                   dict(range=[.6,1],   color="rgba(255,77,106,.08)")]),
         title=dict(text="CORR",font=dict(size=7,color=C["text"]))))
-    fig.update_layout(paper_bgcolor=C["bg2"],height=140,margin=dict(l=8,r=8,t=20,b=4)); return fig
+    fig.update_layout(paper_bgcolor=C["bg2"],height=140,margin=dict(l=8,r=8,t=20,b=4))
+    return fig
 
-def build_corr_chart(corr_data):
+
+def build_corr_chart(corr_data:List[dict]) -> go.Figure:
     fig=go.Figure()
     if corr_data:
         times=[d["time"] for d in corr_data]; corrs=[d["corr"] for d in corr_data]
         fig.add_trace(go.Scatter(x=times,y=corrs,line=dict(color=C["gold"],width=1.5),
-            fill="tozeroy",fillcolor="rgba(247,181,41,.06)",hovertemplate="%{x|%H:%M}<br><b>%{y:.4f}</b><extra></extra>"))
+            fill="tozeroy",fillcolor="rgba(247,181,41,.06)",
+            hovertemplate="%{x|%H:%M}<br><b>%{y:.4f}</b><extra></extra>"))
         fig.add_hrect(y0=-1.05,y1=-.6,fillcolor="rgba(0,212,170,.05)",line=dict(width=0))
         fig.add_hrect(y0=.6,y1=1.05,fillcolor="rgba(255,77,106,.05)",line=dict(width=0))
         for y,c,lbl in [(-.6,C["green"],"-0.6 Signal"),(0,C["text"],"0"),(.6,C["red"],"0.6")]:
-            fig.add_hline(y=y,line=dict(color=c,width=.8,dash="dot"),opacity=.55,annotation_text=lbl,annotation_position="left",annotation_font=dict(color=c,size=8))
+            fig.add_hline(y=y,line=dict(color=c,width=.8,dash="dot"),opacity=.55,
+                           annotation_text=lbl,annotation_position="left",
+                           annotation_font=dict(color=c,size=8))
     else:
-        fig.add_annotation(text="En attente OHLCV…",xref="paper",yref="paper",x=.5,y=.5,font=dict(color=C["text"],size=11),showarrow=False)
-    fig.update_layout(paper_bgcolor=C["bg2"],plot_bgcolor=C["bg"],height=175,margin=dict(l=0,r=60,t=24,b=0),
+        fig.add_annotation(text="En attente OHLCV…",xref="paper",yref="paper",x=.5,y=.5,
+                            font=dict(color=C["text"],size=11),showarrow=False)
+    fig.update_layout(
+        paper_bgcolor=C["bg2"],plot_bgcolor=C["bg"],
+        height=175,margin=dict(l=0,r=60,t=24,b=0),
         font=dict(family="JetBrains Mono",color=C["text"],size=8),
         title=dict(text='<span style="color:#6b7a94;font-size:8px">CORRÉLATION ROLLING GOLD/DXY  (fenêtre 50 bougies)</span>',x=.01),
         hovermode="x unified",showlegend=False,dragmode="pan",
-        yaxis=dict(range=[-1.05,1.05],showgrid=True,gridcolor=C["grid"],zeroline=False,tickfont=dict(size=8),tickvals=[-1,-.6,-.2,0,.2,.6,1]),
-        xaxis=dict(showgrid=False,tickfont=dict(size=8))); return fig
+        yaxis=dict(range=[-1.05,1.05],showgrid=True,gridcolor=C["grid"],zeroline=False,
+                    tickfont=dict(size=8),tickvals=[-1,-.6,-.2,0,.2,.6,1]),
+        xaxis=dict(showgrid=False,tickfont=dict(size=8)),
+    )
+    return fig
 
-def _plt(fig,key,small=False):
-    cfg={"displaylogo":False,"scrollZoom":not small,"displayModeBar":not small,"modeBarButtonsToRemove":["lasso2d","select2d","autoScale2d"]}
+
+def _plt(fig, key:str, small:bool=False):
+    cfg={"displaylogo":False,"scrollZoom":not small,"displayModeBar":not small,
+          "modeBarButtonsToRemove":["lasso2d","select2d","autoScale2d"]}
     try:    st.plotly_chart(fig,width="stretch",config=cfg,key=key)
     except: st.plotly_chart(fig,use_container_width=True,config=cfg,key=key)
-
-# ─── FETCH DONNÉES ────────────────────────────────────────────────────────────
-_process_ws()
-if not ss.ws_connected:
-    snap=_http_snap()
-    if snap: _apply(snap)
-    else:    _simulate()
-
-ss.tick+=1
-tf=ss.tf; tf_min={"M5":5,"M15":15,"H1":60}[tf]
-gold_c=ss.ohlcv.get(tf,[]) or _sim_ohlcv(200,tf_min,"XAUUSD")
-dxy_c=_sim_ohlcv(200,tf_min,"DXY")
-signal=ss.signal if isinstance(ss.signal,dict) else _INIT["signal"]
-zones=ss.zones  if isinstance(ss.zones,dict)  else _INIT["zones"]
-mtf=ss.mtf; ws_ok=ss.ws_connected; mt5_ok=ss.mt5_connected
-sig_dir=signal.get("direction","WAIT"); ant=signal.get("anticipation") or ""
-BC={"BUY":"bb","SELL":"bs","WAIT":"bw"}
-corr_data=_rolling_corr(gold_c,dxy_c,window=50)
-
 # ═══════════════════════════════════════════════════════════════════════
 #  SIDEBAR — st.sidebar NATIVE
 # ═══════════════════════════════════════════════════════════════════════
