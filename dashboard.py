@@ -229,19 +229,44 @@ _INIT: Dict = {
 }
 # 🔒 Sécurité supplémentaire
 
-ss = st.session_state  # ✅ ajoute cette ligne juste au-dessus
-
+# ─────────────────────────────────────────
+# INIT SESSION STATE (IMPORTANT)
+# ─────────────────────────────────────────
 
 for k, v in _INIT.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# maintenant on peut utiliser ss
+ss = st.session_state
 
-if "signal" not in ss or not isinstance(ss.signal, dict):
+# ─────────────────────────────────────────
+# SAFE FIX (ANTI BUG)
+# ─────────────────────────────────────────
+
+if not isinstance(ss.get("signal", {}), dict):
     ss.signal = {
         "direction": "WAIT",
         "confidence": 0,
-        "corr": 0.0
+        "corr": 0.0,
+        "entry": 0.0,
+        "tp": 0.0,
+        "sl": 0.0,
+        "rr": 0.0,
+        "pipeline_state": "IDLE"
+    }
+
+if not isinstance(ss.get("zones", {}), dict):
+    ss.zones = {
+        "support": 0.0,
+        "resistance": 0.0,
+        "fvg_bullish": [],
+        "fvg_bearish": [],
+        "ob_buy": None,
+        "ob_sell": None,
+        "atr": 0.0,
+        "fvg_filter": 0.0
+    }
     }
 # ─────────────────────────────────────────────────────────────────────────────
 #  WEBSOCKET THREAD
