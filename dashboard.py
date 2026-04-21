@@ -60,7 +60,7 @@ REFRESH_S    = 3
 # ─────────────────────────────────────────────────────────────────────────────
 #  CSS GLOBAL
 # ─────────────────────────────────────────────────────────────────────────────
-"""
+
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Syne:wght@700;800&display=swap');
@@ -183,7 +183,7 @@ hr   { border-color: var(--border) !important; margin: 7px 0 !important; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 </style>
 """, unsafe_allow_html=True)
-"""
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  COULEURS PLOTLY
 # ─────────────────────────────────────────────────────────────────────────────
