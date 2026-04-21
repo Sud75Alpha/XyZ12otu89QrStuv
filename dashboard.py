@@ -36,7 +36,8 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
-
+st.sidebar.title("TEST SIDEBAR")
+st.sidebar.write("Si tu vois ça → sidebar OK")
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG API
 # ─────────────────────────────────────────────────────────────────────────────
@@ -93,7 +94,7 @@ html, body, [class*="css"] {
     background: linear-gradient(180deg, #0c1018 0%, #080b0f 100%) !important;
     border-right: 1px solid var(--border) !important;
 }
-[data-testid="stSidebarCollapseButton"] { display: none !important; }
+/*[data-testid="stSidebarCollapseButton"] { display: none !important; }*/
 
 /* ── Metrics ── */
 [data-testid="metric-container"] {
