@@ -38,6 +38,7 @@ st.set_page_config(
 )
 st.sidebar.title("TEST SIDEBAR")
 st.sidebar.write("Si tu vois ça → sidebar OK")
+st.write("APP OK")
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG API
 # ─────────────────────────────────────────────────────────────────────────────
