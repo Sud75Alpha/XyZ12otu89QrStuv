@@ -239,7 +239,12 @@ for k, v in _INIT.items():
         st.session_state[k] = v
 
 ss = st.session_state
-
+if "signal" not in ss or not isinstance(ss.signal, dict):
+    ss.signal = {
+        "direction": "WAIT",
+        "confidence": 0,
+        "corr": 0.0
+    }
 # ─────────────────────────────────────────────────────────────────────────────
 #  WEBSOCKET THREAD
 # ─────────────────────────────────────────────────────────────────────────────
