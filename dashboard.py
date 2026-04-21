@@ -37,42 +37,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-ss = st.session_state
-
-# 🔒 Sécurisation des variables (ANTI-CRASH)
-defaults = {
-    "tf": "M5",
-    "gold_change": 0,
-    "gold_pct": 0,
-    "gold_price": 0,
-    "dxy_change": 0,
-    "dxy_price": 0,
-    "correlation": 0,
-    "show_zones": True,
-    "winrate": 0,
-    "wins": 0,
-    "losses": 0,
-    "gold_symbol": "XAUUSD",
-    "tick": 0,
-}
-
-for k, v in defaults.items():
-    if k not in ss:
-        ss[k] = v
-
-# 🔒 Sécurisation objets externes
-signal = signal if 'signal' in locals() and signal else {}
-zones = zones if 'zones' in locals() and zones else {}
-
-# 🔒 Variables manquantes
-ant = ant if 'ant' in locals() else ""
-sig_dir = sig_dir if 'sig_dir' in locals() else "NONE"
-BC = BC if 'BC' in locals() else {"NONE": "ba"}
-ws_ok = ws_ok if 'ws_ok' in locals() else False
-mt5_ok = mt5_ok if 'mt5_ok' in locals() else False
-API_URL = API_URL if 'API_URL' in locals() else ""
-tf = ss.tf
-
 # ─────────────────────────────────────────────────────────────────────────────
 #  CONFIG API
 # ─────────────────────────────────────────────────────────────────────────────
@@ -263,7 +227,13 @@ _INIT: Dict = {
     "bot_status": "unknown", "mt5_connected": False,
     "gold_symbol": "XAUUSD", "last_update": "—",
 }
+# 🔒 Sécurité supplémentaire
+if not isinstance(ss.signal, dict):
+    ss.signal = {}
 
+if not isinstance(ss.zones, dict):
+    ss.zones = {}
+    
 for k, v in _INIT.items():
     if k not in st.session_state:
         st.session_state[k] = v
@@ -558,7 +528,7 @@ tf_min  = {"M5":5,"M15":15,"H1":60}[tf]
 gold_c  = ss.ohlcv.get(tf,[]) or _sim_ohlcv(200,tf_min,"XAUUSD")
 dxy_c   = _sim_ohlcv(200,tf_min,"DXY")
 signal  = ss.signal
-zones   = ss.zones
+zones = ss.zones if isinstance(ss.zones, dict) else {}
 mtf     = ss.mtf
 ws_ok   = ss.ws_connected
 mt5_ok  = ss.mt5_connected
@@ -571,73 +541,55 @@ corr_data = _rolling_corr(gold_c, dxy_c, window=50)
 # ─────────────────────────────────────────────────────────────────────────────
 #  SIDEBAR — st.sidebar native
 # ─────────────────────────────────────────────────────────────────────────────
+
 with st.sidebar:
 
+    # Titre sidebar
     st.markdown("""
     <div style="padding:8px 0 12px;">
-        <div style="font-weight:800;font-size:1rem;
+        <div style="font-family:'Syne',sans-serif;font-weight:800;font-size:1rem;
                     background:linear-gradient(90deg,#f7b529,#ffd166);
                     -webkit-background-clip:text;-webkit-text-fill-color:transparent;">
             ⚡ GOLD/DXY PRO
         </div>
-        <div style="font-size:.5rem;color:#2e3a4e;text-transform:uppercase;">
+        <div style="font-size:.5rem;color:#2e3a4e;letter-spacing:.1em;text-transform:uppercase;margin-top:1px;">
             Algo Trading Dashboard
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
 
-    # Timeframe sécurisé
+    # ── Timeframe ──────────────────────────────────────────────────────────────
+    st.markdown('<div class="lbl">Timeframe</div>', unsafe_allow_html=True)
     options = ["M5", "M15", "H1"]
+
+    # 🔒 Sécurisation anti-crash
     if ss.tf not in options:
         ss.tf = "M5"
 
     tf_sel = st.radio(
         "TF",
         options,
-        index=options.index(ss.tf),
         horizontal=True,
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        index=options.index(ss.tf)
     )
-
-    if tf_sel != ss.tf:
-        ss.tf = tf_sel
+    if tf_sel != ss.tf: ss.tf = tf_sel
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # Prix
-    gc = "#00d4aa" if ss.gold_change >= 0 else "#ff4d6a"
-    dc = "#00d4aa" if ss.dxy_change >= 0 else "#ff4d6a"
-
+    # ── Prix live ──────────────────────────────────────────────────────────────
+    gc="#00d4aa" if ss.gold_change>=0 else "#ff4d6a"
+    dc="#00d4aa" if ss.dxy_change >=0 else "#ff4d6a"
     st.markdown(f"""
     <div class="card">
-        <div>XAUUSD</div>
-        <div>{ss.gold_price:,.2f}</div>
-        <div style="color:{gc};">{ss.gold_change:+.2f}</div>
+        <div class="lbl">XAUUSD</div>
+        <div style="font-size:1.1rem;font-weight:700;color:#f7b529;">{ss.gold_price:,.2f}</div>
+        <div style="font-size:.57rem;color:{gc};">{ss.gold_change:+.2f} ({ss.gold_pct:+.2f}%)</div>
     </div>
     <div class="card">
-        <div>DXY</div>
-        <div>{ss.dxy_price:.3f}</div>
-        <div style="color:{dc};">{ss.dxy_change:+.4f}</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    # Signal sécurisé
-    conf = signal.get("confidence", 0)
-    st.write("Signal:", sig_dir)
-    st.write("Confidence:", conf)
-
-    st.markdown("<hr>", unsafe_allow_html=True)
-
-    # Stats
-    c1, c2 = st.columns(2)
-    with c1:
-        st.metric("Winrate", f"{ss.winrate}%")
-    with c2:
-        st.metric("Trades", f"{ss.wins}/{ss.losses}")
-
-    st.write(f"{ss.gold_symbol} | {ss.tf}")
+        <div class="lbl">DXY</div>
+        <div style="font-size:1.1rem;font-weight:700;color:#4da6ff;">{ss.dxy_price:.3f}</div>
+        <div style="font-size:.57rem;color:{dc};">{ss.dxy_change:+.4f}</div>
+    </div>""", unsafe_allow_html=True)
 
     # ── Signal ────────────────────────────────────────────────────────────────
     conf  = signal.get("confidence",0)
@@ -954,16 +906,6 @@ with tab5:
     else:
         st.markdown('<div style="text-align:center;padding:35px;color:#2e3a4e;font-size:.7rem;">Aucun signal enregistré.<br>Lance le bot + api_server.py</div>',
                     unsafe_allow_html=True)
-
-st.title("Dashboard")
-
-col1, col2 = st.columns(2)
-
-with col1:
-    st.write("Graphique 1")
-
-with col2:
-    st.write("Graphique 2")
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  FOOTER + RERUN
