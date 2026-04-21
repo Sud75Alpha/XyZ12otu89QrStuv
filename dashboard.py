@@ -955,6 +955,16 @@ with tab5:
         st.markdown('<div style="text-align:center;padding:35px;color:#2e3a4e;font-size:.7rem;">Aucun signal enregistré.<br>Lance le bot + api_server.py</div>',
                     unsafe_allow_html=True)
 
+st.title("Dashboard")
+
+col1, col2 = st.columns(2)
+
+with col1:
+    st.write("Graphique 1")
+
+with col2:
+    st.write("Graphique 2")
+
 # ─────────────────────────────────────────────────────────────────────────────
 #  FOOTER + RERUN
 # ─────────────────────────────────────────────────────────────────────────────
