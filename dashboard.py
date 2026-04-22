@@ -146,7 +146,7 @@ def _ws_fn(q,stop):
         if not stop.is_set(): time.sleep(delay); delay=min(delay*1.5,20)
 
 def _start_ws():
-    if not USE_WS:
+    if not HAS_WS:
         return          # ← ne pas démarrer le WS
     if ss.ws_thread and ss.ws_thread.is_alive(): return
     
