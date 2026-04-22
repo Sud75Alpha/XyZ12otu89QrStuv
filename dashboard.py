@@ -11,7 +11,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from datetime import datetime, timedelta
 from typing import List, Optional, Dict
-import requests
+#import requests
 
 try:
     import requests as _req
@@ -45,16 +45,16 @@ WS_URL       = API_URL.replace("https://","wss://").replace("http://","ws://") +
 HTTP_HEADERS = {"X-API-Key": API_KEY}
 REFRESH_S    = 2
 
-API_URL = "http://localhost:8000"
-API_KEY = "gold_dxy_secret_2024"
+#API_URL = "http://localhost:8000"
+#API_KEY = "gold_dxy_secret_2024"
 
-headers = {
-    "X-API-Key": API_KEY
-}
+#headers = {
+    #"X-API-Key": API_KEY
+#}
 
-res = requests.get(f"{API_URL}/api/snapshot", headers=headers)
+#res = requests.get(f"{API_URL}/api/snapshot", headers=headers)
 
-data = res.json()
+#data = res.json()
 
 # ─── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
