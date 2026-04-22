@@ -20,6 +20,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 import uvicorn
+import plotly.graph_objects as go
+from dataclasses import dataclass, field
+from fvg_engine import compute_zones_with_quality_fvg
 
 MT5_AVAILABLE = False
 try:
@@ -347,7 +350,7 @@ def compute_zones(candles: List[Dict]) -> Dict:
 # ─────────────────────────────────────────────────────────────────────────────
 #  MT5 DATA THREAD
 # ─────────────────────────────────────────────────────────────────────────────
-
+z = compute_zones(m5c)
 def _find_symbol(candidates, available):
     for s in candidates:
         if s in available: return s
@@ -531,7 +534,7 @@ def mt5_data_thread():
             STATE.add_log("ERROR", str(e))
             time.sleep(2)
 
-
+z = compute_zones_with_quality_fvg(m5c)
 # ─────────────────────────────────────────────────────────────────────────────
 #  BROADCAST LOOP
 # ─────────────────────────────────────────────────────────────────────────────
