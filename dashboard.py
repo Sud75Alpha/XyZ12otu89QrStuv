@@ -20,7 +20,7 @@ except ImportError:
 
 try:
     import websocket as _ws
-    HAS_WS = False
+    HAS_WS = True
 except ImportError:
     HAS_WS = False
 
@@ -147,10 +147,21 @@ def _ws_fn(q,stop):
 
 def _start_ws():
     if not HAS_WS:
-        return          # ← ne pas démarrer le WS
-    if ss.ws_thread and ss.ws_thread.is_alive(): return
-    
-_start_ws()
+        return
+
+    if ss.ws_thread and ss.ws_thread.is_alive():
+        return
+
+    ss.ws_queue = queue.Queue()
+    ss.ws_stop = threading.Event()
+
+    ss.ws_thread = threading.Thread(
+        target=_ws_fn,
+        args=(ss.ws_queue, ss.ws_stop),
+        daemon=True
+    )
+
+    ss.ws_thread.start()
 
 # ─── APPLY / PROCESS WS ──────────────────────────────────────────────────────
 def _apply(d):
