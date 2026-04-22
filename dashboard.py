@@ -20,7 +20,7 @@ except ImportError:
 
 try:
     import websocket as _ws
-    HAS_WS = True
+    HAS_WS = False
 except ImportError:
     HAS_WS = False
 
@@ -42,7 +42,7 @@ except Exception:
 
 WS_URL       = API_URL.replace("https://","wss://").replace("http://","ws://") + f"/ws?api_key={API_KEY}"
 HTTP_HEADERS = {"X-API-Key": API_KEY}
-REFRESH_S    = 3
+REFRESH_S    = 2
 
 # ─── CSS ──────────────────────────────────────────────────────────────────────
 st.markdown("""
@@ -146,10 +146,10 @@ def _ws_fn(q,stop):
         if not stop.is_set(): time.sleep(delay); delay=min(delay*1.5,20)
 
 def _start_ws():
+    if not USE_WS:
+        return          # ← ne pas démarrer le WS
     if ss.ws_thread and ss.ws_thread.is_alive(): return
-    q=queue.Queue(maxsize=300); stop=threading.Event()
-    t=threading.Thread(target=_ws_fn,args=(q,stop),daemon=True); t.start()
-    ss.ws_queue=q; ss.ws_thread=t; ss.ws_stop=stop
+    
 _start_ws()
 
 # ─── APPLY / PROCESS WS ──────────────────────────────────────────────────────
@@ -280,66 +280,12 @@ def build_candle(candles,symbol,color,tf,signal=None,zones=None,show_zones=True)
     vc=[C["green"] if c>=o else C["red"] for c,o in zip(df["close"],df["open"])]
     fig.add_trace(go.Bar(x=df["time"],y=df["volume"],marker=dict(color=vc,opacity=.4),showlegend=False),row=2,col=1)
     ax=dict(showgrid=True,gridcolor=C["grid"],gridwidth=1,zeroline=False,tickfont=dict(size=8,color=C["text"]),linecolor=C["grid"])
-        # ── Affichage FVG et OB même si zones vides ──
-# (debug visuel — montre les zones calculées localement)
-    if show_zones and zones and not df.empty:
-    # Recalcul local FVG depuis les candles du graphe
-        highs  = df["high"].values
-        lows   = df["low"].values
-        closes = df["close"].values
-        opens  = df["open"].values
-        n_bars = len(df)
-    
-    # ATR pour filtrer les petits FVG
-        tr = [max(highs[i]-lows[i], 
-                  abs(highs[i]-closes[i-1]) if i>0 else 0,
-                  abs(lows[i] -closes[i-1]) if i>0 else 0)
-              for i in range(n_bars)]
-        atr_local = float(np.mean(tr[-14:])) if n_bars>=14 else float(np.mean(tr))
-        fvg_min   = atr_local * 0.25
-    
-    # FVG Bullish (gap haussier entre bougie i-2 et bougie i)
-        for i in range(2, n_bars):
-            gap = lows[i] - highs[i-2]
-            if gap > fvg_min:
-                fig.add_hrect(
-                    y0=float(highs[i-2]), y1=float(lows[i]),
-                    row=1, col=1,
-                    fillcolor="rgba(0,212,170,0.12)",
-                    line=dict(color="rgba(0,212,170,0.35)", width=0.8),
-                )
-    
-    # FVG Bearish (gap baissier)
-        for i in range(2, n_bars):
-            gap = lows[i-2] - highs[i]
-            if gap > fvg_min:
-                fig.add_hrect(
-                    y0=float(highs[i]),   y1=float(lows[i-2]),
-                    row=1, col=1,
-                    fillcolor="rgba(255,77,106,0.12)",
-                    line=dict(color="rgba(255,77,106,0.35)", width=0.8),
-                )
-    
-    # Order Blocks
-        for i in range(1, min(n_bars-1, 30)):
-            move = abs(closes[i+1] - closes[i])
-            if move > atr_local * 0.5:
-            # OB Bullish = bougie baissière avant une hausse
-                if opens[i] > closes[i] and closes[i+1] > opens[i+1]:
-                    fig.add_hrect(
-                        y0=float(lows[i]),  y1=float(highs[i]),
-                        row=1, col=1,
-                        fillcolor="rgba(0,212,170,0.08)",
-                        line=dict(color="rgba(0,212,170,0.5)", width=1),
-                    )
-            # OB Bearish = bougie haussière avant une baisse
-                if closes[i] > opens[i] and closes[i+1] < opens[i+1]:
-                    fig.add_hrect(
-                        y0=float(lows[i]),  y1=float(highs[i]),
-                        row=1, col=1,
-                        fillcolor="rgba(255,77,106,0.08)",
-                            line=dict(color="rgba(255,77,106,0.5)", width=1),
-                )
+   # FVG haute qualité depuis fvg_engine
+    from fvg_engine import detect_quality_fvg, draw_fvg_on_figure
+    if show_zones and not df.empty:
+        fvgs = detect_quality_fvg(df, use_trend_filter=True, max_fvg=5)
+        fig  = draw_fvg_on_figure(fig, fvgs, row=1, col=1)
+        
     fig.update_layout(paper_bgcolor=C["bg2"],plot_bgcolor=C["bg"],margin=dict(l=0,r=8,t=28,b=0),height=360,
         font=dict(family="JetBrains Mono",color=C["text"],size=8),
         legend=dict(orientation="h",x=0,y=1.1,bgcolor="rgba(0,0,0,0)",font=dict(size=8)),
