@@ -729,41 +729,38 @@ with st.sidebar:
 
     gc = "#00d4aa" if ss.gold_change >= 0 else "#ff4d6a"
     dc = "#00d4aa" if ss.dxy_change  >= 0 else "#ff4d6a"
-    st.markdown(f"""
-    <div class="card">
-        <div class="lbl">XAUUSD</div>
-        <div style="font-size:1.1rem;font-weight:700;color:#f7b529;">{ss.gold_price:,.2f}</div>
-        <div style="font-size:.57rem;color:{gc};">{ss.gold_change:+.2f} ({ss.gold_pct:+.2f}%)</div>
-    </div>
-    <div class="card">
-        <div class="lbl">DXY</div>
-        <div style="font-size:1.1rem;font-weight:700;color:#4da6ff;">{ss.dxy_price:.3f}</div>
-        <div style="font-size:.57rem;color:{dc};">{ss.dxy_change:+.4f}</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="card"><div class="lbl">XAUUSD</div>'
+        f'<div style="font-size:1.1rem;font-weight:700;color:#f7b529;">{ss.gold_price:,.2f}</div>'
+        f'<div style="font-size:.57rem;color:{gc};">{ss.gold_change:+.2f} ({ss.gold_pct:+.2f}%)</div></div>'
+        f'<div class="card"><div class="lbl">DXY</div>'
+        f'<div style="font-size:1.1rem;font-weight:700;color:#4da6ff;">{ss.dxy_price:.3f}</div>'
+        f'<div style="font-size:.57rem;color:{dc};">{ss.dxy_change:+.4f}</div></div>',
+        unsafe_allow_html=True)
+
 
     conf = signal.get("confidence", 0)
     pipe = signal.get("pipeline_state", "IDLE")
     ant_h = f'<div style="margin-top:3px;"><span class="ba" style="font-size:.55rem;">{ant}</span></div>' if ant else ""
-    st.markdown(f"""
-    <div class="card card-gld">
-        <div class="lbl">Signal</div>
-        <div style="margin:4px 0;"><span class="{BC[sig_dir]}">{sig_dir}</span></div>
-        {ant_h}
-        <div style="font-size:.57rem;color:#6b7a94;line-height:1.9;margin-top:3px;">
-            Conf:&nbsp;<b style="color:#dde3ee;">{conf}%</b><br>
-            Corr:&nbsp;<b style="color:#dde3ee;">{signal.get('corr',0):+.3f}</b><br>
-            <span style="color:#3d4a5e;">{pipe}</span>
-        </div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="card card-gld">'
+        f'<div class="lbl">Signal</div>'
+        f'<div style="margin:4px 0;"><span class="{BC[sig_dir]}">{sig_dir}</span></div>'
+        f'{ant_h}'
+        f'<div style="font-size:.57rem;color:#6b7a94;line-height:1.9;margin-top:3px;">'
+        f'Conf:&nbsp;<b style="color:#dde3ee;">{conf}%</b><br>'
+        f'Corr:&nbsp;<b style="color:#dde3ee;">{signal.get("corr",0):+.3f}</b><br>'
+        f'<span style="color:#3d4a5e;">{pipe}</span>'
+        f'</div></div>',
+        unsafe_allow_html=True)
 
     cc = "#00d4aa" if ss.correlation < -.6 else ("#f7b529" if ss.correlation < -.4 else "#ff4d6a")
     ct = "✅ Forte" if ss.correlation < -.6 else ("⚠️ Modérée" if ss.correlation < -.4 else "❌ Faible")
-    st.markdown(f"""
-    <div class="card">
-        <div class="lbl">Corrélation</div>
-        <div style="font-size:1rem;font-weight:700;color:{cc};">{ss.correlation:+.4f}</div>
-        <div style="font-size:.55rem;color:{cc};margin-top:1px;">{ct}</div>
-    </div>""", unsafe_allow_html=True)
+    st.markdown(
+        f'<div class="card"><div class="lbl">Corrélation</div>'
+        f'<div style="font-size:1rem;font-weight:700;color:{cc};">{ss.correlation:+.4f}</div>'
+        f'<div style="font-size:.55rem;color:{cc};margin-top:1px;">{ct}</div></div>',
+        unsafe_allow_html=True)
 
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown('<div class="lbl">Affichage</div>', unsafe_allow_html=True)
@@ -773,11 +770,10 @@ with st.sidebar:
     n_ob_b = len(gold_obs.get("bullish_obs", []))
     n_ob_s = len(gold_obs.get("bearish_obs", []))
     n_fvg  = len(zones.get("fvg_bullish",[])) + len(zones.get("fvg_bearish",[]))
-    st.markdown(f"""
-    <div style="font-size:.52rem;color:#3d4a5e;line-height:1.8;margin-top:4px;">
-        {n_fvg} FVG · ATR={zones.get('atr',0):.2f}<br>
-        OB↑ {n_ob_b} · OB↓ {n_ob_s} actifs
-    </div>""", unsafe_allow_html=True)
+    st.markdown(
+        f'<div style="font-size:.52rem;color:#3d4a5e;line-height:1.8;margin-top:4px;">'
+        f'{n_fvg} FVG · ATR={zones.get("atr",0):.2f}<br>OB↑ {n_ob_b} · OB↓ {n_ob_s} actifs</div>',
+        unsafe_allow_html=True)
 
     st.markdown("<hr>", unsafe_allow_html=True)
     api_color = "#00d4aa" if api_ok else "#f7b529"
@@ -785,16 +781,15 @@ with st.sidebar:
     dapi = "dg" if api_ok else "dy"
     dmt5 = "dg" if mt5_ok else "dy"
     url_s = API_URL[:26] + ("…" if len(API_URL) > 26 else "")
-    st.markdown(f"""
-    <div style="font-size:.61rem;">
-        <div style="color:{api_color};margin-bottom:3px;">
-            <span class="{dapi}"></span>HTTP {api_label}
-        </div>
-        <div style="color:{'#00d4aa' if mt5_ok else '#f7b529'};">
-            <span class="{dmt5}"></span>MT5 {'Live' if mt5_ok else 'Simulation'}
-        </div>
-        <div style="font-size:.5rem;color:#2e3a4e;margin-top:3px;">{url_s}</div>
-    </div>""", unsafe_allow_html=True)
+    mt5_color = '#00d4aa' if mt5_ok else '#f7b529'
+    mt5_label = 'Live' if mt5_ok else 'Simulation'
+    st.markdown(
+        f'<div style="font-size:.61rem;">'
+        f'<div style="color:{api_color};margin-bottom:3px;"><span class="{dapi}"></span>HTTP {api_label}</div>'
+        f'<div style="color:{mt5_color};"><span class="{dmt5}"></span>MT5 {mt5_label}</div>'
+        f'<div style="font-size:.5rem;color:#2e3a4e;margin-top:3px;">{url_s}</div>'
+        f'</div>',
+        unsafe_allow_html=True)
 
     st.markdown("<hr>", unsafe_allow_html=True)
     c1, c2 = st.columns(2)
