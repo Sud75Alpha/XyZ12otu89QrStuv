@@ -1,6 +1,6 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║              GOLD / DXY — SYSTÈME DE SIGNAUX PROGRESSIFS                    ║
+║              GOLD / DXY — SYSTÈME DE SIGNAUX PROGRESSIFS v2.1               ║
 ║         H1 (alerte) → M15 (confirmation) → M5 (entrée + TP/SL)             ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
@@ -10,15 +10,13 @@ import logging
 import requests
 import numpy as np
 import pandas as pd
-from datetime import datetime
-from typing import Optional, Dict, List
+from datetime import datetime, timedelta
+from typing import Optional, Dict, List, Tuple
 import os
-import requests
 
-API_URL = "http://localhost:8000"   
-API_KEY = "gold_dxy_secret_2024"
+API_URL     = os.getenv("API_URL",  "http://localhost:8000")
+API_KEY     = os.getenv("API_KEY",  "gold_dxy_secret_2024")
 API_HEADERS = {"X-API-Key": API_KEY}
-
 
 try:
     from dotenv import load_dotenv
@@ -31,61 +29,65 @@ try:
     MT5_AVAILABLE = True
 except ImportError:
     MT5_AVAILABLE = False
+    mt5 = None
 
-# ── Modules d'amélioration (optionnels — fallback automatique si absents) ──
 try:
     from risk import compute_smart_sl_tp as _smart_sl_tp
     SMART_RISK = True
 except ImportError:
     SMART_RISK = False
 
-DASHBOARD_OK = False  # Dashboard remplacé par API server
-
 # ─────────────────────────────────────────────────────────────────────────────
-#  ██████╗  CONFIG — MODIFIER ICI
+#  CONFIG
 # ─────────────────────────────────────────────────────────────────────────────
 
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_TOKEN",   "VOTRE_TOKEN_ICI")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "VOTRE_CHAT_ID_ICI")
 
-# Symboles
 GOLD_SYMBOLS = ["XAUUSD", "GOLD", "XAUUSDm", "XAU/USD"]
-DXY_SYMBOLS  = ["DXY", "USDX", "USDIndex", "DX-Y.NYB", "DXYF"]
+DXY_SYMBOLS  = ["DXY", "USDX", "USDIndex", "DX-Y.NYB", "DXYF", "DXYm"]
 
-# Paramètres corrélation
-CORR_WINDOW        = 50
-CORR_NORMAL_THRESH = -0.65
-CORR_BREAK_THRESH  = -0.20
+# Corrélation
+CORR_WINDOW         = 50
+CORR_SIGNAL_THRESH  = -0.60   # H1 (assoupli pour DXYm)
+CORR_CONFIRM_THRESH = -0.50   # M15/M5
+CORR_BREAK_THRESH   = -0.20
 
-# Paramètres TP/SL fallback (si risk.py absent)
-TP_PIPS = 150
-SL_PIPS = 80
-ATR_PERIOD = 14
+# TP/SL ATR fallback
+TP_ATR_MULT = 2.0
+SL_ATR_MULT = 1.0
+ATR_PERIOD  = 14
 
-# Winrate
-WINRATE_HISTORY = 30
+# Pipeline timeouts
+H1_TO_M15_TIMEOUT_MIN = 45
+M15_TO_M5_TIMEOUT_MIN = 30
 
-# Timings
-LOOP_INTERVAL_SEC   = 120
-SIGNAL_COOLDOWN_SEC = 900
+# Anti-spam
+SIGNAL_COOLDOWN_SEC = 3600
 
-# Logging
-LOG_FILE = "gold_dxy.log"
+# Boucle
+LOOP_INTERVAL_SEC = 60
+LOG_FILE          = "gold_dxy.log"
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  LOGGING
 # ─────────────────────────────────────────────────────────────────────────────
 
-def setup_logging():
+def setup_logging() -> logging.Logger:
     logger = logging.getLogger("GoldDXY")
+    if logger.handlers:
+        return logger
     logger.setLevel(logging.INFO)
     fmt = logging.Formatter("[%(asctime)s] %(levelname)s | %(message)s", "%Y-%m-%d %H:%M:%S")
     ch = logging.StreamHandler()
     ch.setFormatter(fmt)
     logger.addHandler(ch)
-    fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
-    fh.setFormatter(fmt)
-    logger.addHandler(fh)
+    try:
+        fh = logging.FileHandler(LOG_FILE, encoding="utf-8")
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+    except Exception:
+        pass
     return logger
 
 log = setup_logging()
@@ -95,115 +97,126 @@ log = setup_logging()
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SignalHistory:
-    """Stocke les signaux et simule un winrate basé sur la force du signal."""
-
-    def __init__(self):
+    def __init__(self, max_history: int = 50):
         self.signals: List[Dict] = []
+        self.max_history = max_history
 
-    def add(self, direction: str, corr_prev: float, corr_curr: float, dxy_change: float):
-        breakout_strength = abs(corr_prev - corr_curr)
-        dxy_alignment     = abs(dxy_change)
-        quality = min(100, int(
-            (breakout_strength / 1.5) * 60 +
-            (dxy_alignment / 0.5) * 40
-        ))
-        import random
-        random.seed(int(datetime.now().timestamp()) % 1000)
-        win_prob = 0.40 + (quality / 100) * 0.35
-        result = "WIN" if random.random() < win_prob else "LOSS"
+    def add(self, direction: str, corr: float, confidence: int,
+            entry: float, tp: float, sl: float, rr: float) -> None:
         self.signals.append({
-            "time"      : datetime.now(),
-            "direction" : direction,
-            "quality"   : quality,
-            "result"    : result,
+            "time": datetime.now().isoformat(), "direction": direction,
+            "corr": corr, "confidence": confidence,
+            "entry": entry, "tp": tp, "sl": sl, "rr": rr, "result": "OPEN",
         })
-        if len(self.signals) > WINRATE_HISTORY:
-            self.signals = self.signals[-WINRATE_HISTORY:]
-        return quality
+        if len(self.signals) > self.max_history:
+            self.signals = self.signals[-self.max_history:]
 
     def get_winrate(self) -> float:
-        if len(self.signals) < 3:
-            return 62.0
-        wins = sum(1 for s in self.signals if s["result"] == "WIN")
-        return round((wins / len(self.signals)) * 100, 1)
+        closed = [s for s in self.signals if s["result"] in ("WIN", "LOSS")]
+        if len(closed) < 3:
+            return 0.0
+        return round(sum(1 for s in closed if s["result"] == "WIN") / len(closed) * 100, 1)
 
-    def get_signal_count(self) -> int:
-        return len(self.signals)
+    def get_stats(self) -> Dict:
+        closed = [s for s in self.signals if s["result"] in ("WIN", "LOSS")]
+        wins   = sum(1 for s in closed if s["result"] == "WIN")
+        return {"winrate": self.get_winrate(), "wins": wins,
+                "losses": len(closed) - wins, "total": len(self.signals)}
+
+    def to_list(self) -> List[Dict]:
+        return self.signals.copy()
+
 
 history = SignalHistory()
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  CONNEXION MT5 & DÉTECTION SYMBOLES
+#  CONNEXION MT5
 # ─────────────────────────────────────────────────────────────────────────────
 
-gold_symbol = None
-dxy_symbol  = None
+gold_symbol:   Optional[str] = None
+dxy_symbol:    Optional[str] = None
+mt5_connected: bool          = False
+
 
 def connect_mt5() -> bool:
-    global gold_symbol, dxy_symbol
+    global gold_symbol, dxy_symbol, mt5_connected
     if not MT5_AVAILABLE:
         log.warning("MT5 non disponible — mode simulation")
-        gold_symbol = "XAUUSD (sim)"
-        dxy_symbol  = "DXY (sim)"
+        gold_symbol = "XAUUSD"; dxy_symbol = "DXY"; mt5_connected = False
         return False
     if not mt5.initialize():
         log.error(f"Connexion MT5 échouée: {mt5.last_error()}")
-        return False
+        mt5_connected = False; return False
     info = mt5.account_info()
     if info:
         log.info(f"MT5 connecté | Compte: {info.login} | Broker: {info.company}")
-    available = {s.name for s in mt5.symbols_get()}
+    available   = {s.name for s in mt5.symbols_get()}
     gold_symbol = _find_symbol(GOLD_SYMBOLS, available, "GOLD")
     dxy_symbol  = _find_symbol(DXY_SYMBOLS,  available, "DXY")
     if not gold_symbol:
-        log.error("Symbole GOLD introuvable!")
-        return False
+        log.error("Symbole GOLD introuvable!"); mt5_connected = False; return False
     if not dxy_symbol:
-        log.warning("Symbole DXY introuvable — signaux désactivés")
-        return False
+        log.warning(f"DXY introuvable. Disponibles: {sorted(available)[:15]}")
+        mt5_connected = False; return False
+    mt5_connected = True
+    log.info(f"Symboles: Gold={gold_symbol} | DXY={dxy_symbol}")
     return True
 
-def _find_symbol(candidates, available, label):
+
+def _find_symbol(candidates: List[str], available: set, label: str) -> Optional[str]:
     for s in candidates:
         if s in available:
-            log.info(f"Symbole {label}: {s}")
-            return s
+            log.info(f"Symbole {label}: {s}"); return s
     for s in available:
         for c in candidates:
             if c.upper() in s.upper():
-                log.info(f"Symbole {label} (partiel): {s}")
-                return s
+                log.info(f"Symbole {label} (partiel): {s}"); return s
     return None
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  RÉCUPÉRATION DONNÉES
+#  SIMULATION CORRÉLÉE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _simulate_correlated(n: int, tf_minutes: int) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    now   = datetime.now()
+    times = pd.date_range(end=now, periods=n, freq=f"{tf_minutes}min")
+    rng   = np.random.default_rng(int(time.time()) // (tf_minutes * 30))
+    common = np.cumsum(rng.normal(0, 1, n))
+    gold_close = 2320.0 + (common * 1.2 + np.cumsum(rng.normal(0, 0.4, n))) * 0.8
+    dxy_close  = 104.5  + (-common * 0.6 + np.cumsum(rng.normal(0, 0.4, n))) * 0.15
+    gold_close -= gold_close[0] - 2320.0
+    dxy_close  -= dxy_close[0]  - 104.5
+
+    def _build(closes, vol):
+        opens  = np.roll(closes, 1); opens[0] = closes[0]
+        spread = np.abs(rng.normal(0, vol, n)) * 0.5 + vol * 0.3
+        return pd.DataFrame({
+            "open":  np.round(opens, 4),
+            "high":  np.round(np.maximum(opens, closes) + spread, 4),
+            "low":   np.round(np.minimum(opens, closes) - spread, 4),
+            "close": np.round(closes, 4),
+            "tick_volume": rng.exponential(2000, n).astype(int),
+        }, index=times)
+
+    return _build(gold_close, 0.5), _build(dxy_close, 0.02)
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  DONNÉES MT5
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_ohlc(symbol: str, tf_mt5, n_bars: int) -> Optional[pd.DataFrame]:
-    if not MT5_AVAILABLE:
-        return _simulate(symbol, n_bars)
-    rates = mt5.copy_rates_from_pos(symbol, tf_mt5, 0, n_bars)
-    if rates is None or len(rates) == 0:
-        log.warning(f"Pas de données: {symbol}")
+    if not MT5_AVAILABLE or not mt5_connected:
         return None
-    df = pd.DataFrame(rates)
-    df["time"] = pd.to_datetime(df["time"], unit="s")
-    df.set_index("time", inplace=True)
-    return df[["open", "high", "low", "close", "tick_volume"]]
-
-def _simulate(symbol: str, n: int) -> pd.DataFrame:
-    np.random.seed(hash(symbol) % 2**31)
-    times = pd.date_range(end=datetime.now(), periods=n, freq="5min")
-    base = 2320.0 if "XAU" in symbol.upper() or "GOLD" in symbol.upper() else 104.5
-    vol  = 8.0    if "XAU" in symbol.upper() or "GOLD" in symbol.upper() else 0.3
-    close = base + np.cumsum(np.random.randn(n) * vol * 0.15)
-    return pd.DataFrame({
-        "open": close - np.random.rand(n) * vol * 0.05,
-        "high": close + np.random.rand(n) * vol * 0.1,
-        "low" : close - np.random.rand(n) * vol * 0.1,
-        "close": close,
-        "tick_volume": np.random.randint(50, 500, n).astype(float),
-    }, index=times)
+    try:
+        rates = mt5.copy_rates_from_pos(symbol, tf_mt5, 0, n_bars)
+        if rates is None or len(rates) == 0:
+            log.warning(f"Pas de données MT5: {symbol}"); return None
+        df = pd.DataFrame(rates)
+        df["time"] = pd.to_datetime(df["time"], unit="s")
+        df.set_index("time", inplace=True)
+        return df[["open", "high", "low", "close", "tick_volume"]]
+    except Exception as e:
+        log.error(f"Erreur get_ohlc {symbol}: {e}"); return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  CALCULS TECHNIQUES
@@ -215,94 +228,243 @@ def compute_atr(df: pd.DataFrame, period: int = ATR_PERIOD) -> float:
     lc  = (df["low"]  - df["close"].shift()).abs()
     tr  = pd.concat([hl, hc, lc], axis=1).max(axis=1)
     atr = tr.rolling(period).mean().iloc[-1]
-    return round(float(atr), 2) if not np.isnan(atr) else 10.0
+    return round(float(atr), 4) if not np.isnan(atr) else 10.0
+
 
 def rolling_corr(s1: pd.Series, s2: pd.Series, w: int) -> pd.Series:
-    aligned1, aligned2 = s1.align(s2, join="inner")
-    return aligned1.rolling(w).corr(aligned2)
+    s1a, s2a = s1.align(s2, join="inner")
+    return s1a.rolling(w).corr(s2a)
 
-def get_trend(df: pd.DataFrame, n: int = 5) -> tuple:
+
+def get_trend(df: pd.DataFrame, n: int = 5) -> Tuple[str, float, float]:
     if df is None or len(df) < n + 1:
         return "→ Stable", 0.0, 0.0
     last  = float(df["close"].iloc[-1])
     first = float(df["close"].iloc[-n])
     pct   = ((last - first) / first) * 100 if first != 0 else 0.0
-    if pct > 0.03:
-        trend = "↑ Hausse"
-    elif pct < -0.03:
-        trend = "↓ Baisse"
-    else:
-        trend = "→ Stable"
-    return trend, round(pct, 3), round(last, 4)
+    trend = "↑ Hausse" if pct > 0.03 else ("↓ Baisse" if pct < -0.03 else "→ Stable")
+    return trend, round(pct, 4), round(last, 4)
 
-def compute_tp_sl(direction: str, gold_df: pd.DataFrame) -> tuple:
-    """Calcule TP et SL dynamiques basés sur l'ATR (fallback)."""
-    atr        = compute_atr(gold_df)
-    last_price = float(gold_df["close"].iloc[-1])
-    tp_dist    = max(TP_PIPS, atr * 1.5)
-    sl_dist    = max(SL_PIPS, atr * 0.8)
-    if direction == "BUY":
-        tp = round(last_price + tp_dist, 2)
-        sl = round(last_price - sl_dist, 2)
-    else:
-        tp = round(last_price - tp_dist, 2)
-        sl = round(last_price + sl_dist, 2)
-    rr = round(tp_dist / sl_dist, 2)
-    return last_price, tp, sl, round(atr, 2), rr
+
+def compute_confidence(corr_curr: float, corr_prev: float,
+                       atr: float, move: float, dxy_pct: float) -> int:
+    corr_score      = min(40, int(abs(corr_curr) * 40)) if corr_curr < 0 else 0
+    stability_score = max(0, int(30 - abs(corr_curr - corr_prev) * 60))
+    dxy_score       = min(30, int(abs(dxy_pct) * 600))
+    return min(100, corr_score + stability_score + dxy_score)
+
+
+def compute_tp_sl(direction: str, gold_df: pd.DataFrame,
+                  atr: Optional[float] = None) -> Tuple[float, float, float, float, float]:
+    if atr is None:
+        atr = compute_atr(gold_df)
+    entry   = round(float(gold_df["close"].iloc[-1]), 2)
+    tp_dist = round(atr * TP_ATR_MULT, 2)
+    sl_dist = round(atr * SL_ATR_MULT, 2)
+    tp = round(entry + tp_dist, 2) if direction == "BUY" else round(entry - tp_dist, 2)
+    sl = round(entry - sl_dist, 2) if direction == "BUY" else round(entry + sl_dist, 2)
+    rr = round(tp_dist / sl_dist, 2) if sl_dist > 0 else 0.0
+    return entry, tp, sl, atr, rr
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  DÉTECTION DE SIGNAL SUR UN TIMEFRAME
+#  ANALYSE PAR TIMEFRAME
 # ─────────────────────────────────────────────────────────────────────────────
 
-def analyze_tf(tf_name: str, tf_mt5, n_bars: int) -> Optional[Dict]:
-    gold_df = get_ohlc(gold_symbol, tf_mt5, n_bars)
-    dxy_df  = get_ohlc(dxy_symbol,  tf_mt5, n_bars)
+def analyze_tf(tf_name: str, tf_mt5, n_bars: int,
+               gold_df_ext: Optional[pd.DataFrame] = None,
+               dxy_df_ext:  Optional[pd.DataFrame] = None) -> Optional[Dict]:
+
+    gold_df = gold_df_ext if gold_df_ext is not None else get_ohlc(gold_symbol, tf_mt5, n_bars)
+    dxy_df  = dxy_df_ext  if dxy_df_ext  is not None else get_ohlc(dxy_symbol,  tf_mt5, n_bars)
+
     if gold_df is None or dxy_df is None:
+        log.warning(f"[{tf_name}] Données manquantes"); return None
+
+    min_bars = CORR_WINDOW + 10
+    if len(gold_df) < min_bars or len(dxy_df) < min_bars:
+        log.warning(f"[{tf_name}] Pas assez de bougies: Gold={len(gold_df)} DXY={len(dxy_df)}")
         return None
-    if len(gold_df) < CORR_WINDOW + 10 or len(dxy_df) < CORR_WINDOW + 10:
-        return None
-    corr_series = rolling_corr(gold_df["close"], dxy_df["close"], CORR_WINDOW)
-    if corr_series.dropna().empty:
-        return None
+
+    corr_series = rolling_corr(gold_df["close"], dxy_df["close"], CORR_WINDOW).dropna()
+    if len(corr_series) < 5:
+        log.warning(f"[{tf_name}] Corrélation incalculable"); return None
+
     corr_curr = float(corr_series.iloc[-1])
-    corr_prev = float(corr_series.iloc[-(min(6, len(corr_series)))])
+    corr_prev = float(corr_series.iloc[-min(6, len(corr_series))])
+
     gold_trend, gold_pct, gold_price = get_trend(gold_df, 5)
     dxy_trend,  dxy_pct,  dxy_price  = get_trend(dxy_df,  5)
     atr = compute_atr(gold_df)
-    log.info(f"[{tf_name}] Corr: {corr_prev:+.3f} → {corr_curr:+.3f} | Gold: {gold_trend} | DXY: {dxy_trend}")
-    is_break = (
-        corr_prev < CORR_NORMAL_THRESH and
-        corr_curr > CORR_BREAK_THRESH
+
+    log.info(f"[{tf_name}] Corr={corr_curr:+.3f} | Gold={gold_trend} {gold_pct:+.3f}% | DXY={dxy_trend} {dxy_pct:+.4f}%")
+
+    # Seuil corrélation
+    thresh = CORR_SIGNAL_THRESH if tf_name == "H1" else CORR_CONFIRM_THRESH
+    if corr_curr >= thresh:
+        log.info(f"[{tf_name}] Corrélation insuffisante ({corr_curr:+.3f} >= {thresh})")
+        return None
+
+    # Mouvement DXY (seuil réduit pour DXYm)
+    dxy_up = dxy_pct >  0.010
+    dxy_dn = dxy_pct < -0.010
+    if not dxy_up and not dxy_dn:
+        log.info(f"[{tf_name}] DXY trop stable ({dxy_pct:+.4f}%) — pas de signal")
+        return None
+
+    direction = "SELL" if dxy_up else "BUY"
+
+    # Cohérence Gold (tolérance élargie)
+    gold_aligned = (
+        (direction == "BUY"  and gold_pct > -0.05) or
+        (direction == "SELL" and gold_pct <  0.05)
     )
-    if not is_break:
+    if not gold_aligned:
+        log.info(f"[{tf_name}] Or incohérent ({direction}, gold_pct={gold_pct:+.3f}%)")
         return None
+
+    # Mouvement minimum (réduit à 0.2×ATR)
     move = abs(float(gold_df["close"].iloc[-1]) - float(gold_df["close"].iloc[-6]))
-    if move < atr * 0.4:
-        log.info(f"[{tf_name}] Signal filtré (mouvement trop faible: {move:.2f} vs ATR {atr:.2f})")
+    if move < atr * 0.2:
+        log.info(f"[{tf_name}] Mouvement Or trop faible ({move:.2f} vs ATR×0.2={atr*0.2:.2f})")
         return None
-    dxy_up = "↑" in dxy_trend
-    dxy_dn = "↓" in dxy_trend
-    if dxy_up:
-        direction = "SELL"
-    elif dxy_dn:
-        direction = "BUY"
-    else:
-        log.info(f"[{tf_name}] Cassure détectée mais DXY stable — pas de signal")
+
+    confidence = compute_confidence(corr_curr, corr_prev, atr, move, dxy_pct)
+    min_conf   = 35 if tf_name == "H1" else 45
+    if confidence < min_conf:
+        log.info(f"[{tf_name}] Confidence trop faible ({confidence}% < {min_conf}%)")
         return None
+
+    log.info(f"[{tf_name}] ✅ SIGNAL {direction} | Conf={confidence}% | Corr={corr_curr:+.3f}")
     return {
-        "tf"         : tf_name,
-        "direction"  : direction,
-        "corr_prev"  : corr_prev,
-        "corr_curr"  : corr_curr,
-        "gold_trend" : gold_trend,
-        "gold_pct"   : gold_pct,
-        "gold_price" : gold_price,
-        "dxy_trend"  : dxy_trend,
-        "dxy_pct"    : dxy_pct,
-        "dxy_price"  : dxy_price,
-        "atr"        : atr,
-        "gold_df"    : gold_df,
+        "tf": tf_name, "direction": direction,
+        "corr_curr": round(corr_curr, 4), "corr_prev": round(corr_prev, 4),
+        "gold_trend": gold_trend, "gold_pct": gold_pct, "gold_price": gold_price,
+        "dxy_trend":  dxy_trend,  "dxy_pct":  dxy_pct,  "dxy_price":  dxy_price,
+        "atr": atr, "confidence": confidence,
+        "gold_df": gold_df,  # local uniquement — jamais envoyé en JSON
+        "dxy_df":  dxy_df,
     }
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  PUSH API
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _df_to_ohlcv(df: Optional[pd.DataFrame], limit: int = 200) -> List[Dict]:
+    if df is None or df.empty:
+        return []
+    out = []
+    for idx, row in df.tail(limit).iterrows():
+        out.append({
+            "time":   idx.isoformat() if hasattr(idx, "isoformat") else str(idx),
+            "open":   round(float(row["open"]),  5),
+            "high":   round(float(row["high"]),  5),
+            "low":    round(float(row["low"]),   5),
+            "close":  round(float(row["close"]), 5),
+            "volume": int(row.get("tick_volume", 0)),
+        })
+    return out
+
+
+def push_snapshot(pipeline_state: str,
+                  gold_dfs: Dict[str, Optional[pd.DataFrame]],
+                  dxy_dfs:  Dict[str, Optional[pd.DataFrame]],
+                  current_signal: Optional[Dict] = None,
+                  mtf_results:    Optional[Dict]  = None) -> None:
+
+    gm5 = gold_dfs.get("M5"); dm5 = dxy_dfs.get("M5")
+    gold_price = round(float(gm5["close"].iloc[-1]), 2) if gm5 is not None and not gm5.empty else 0.0
+    dxy_price  = round(float(dm5["close"].iloc[-1]),  3) if dm5 is not None and not dm5.empty else 0.0
+    gold_prev  = float(gm5["close"].iloc[-2]) if gm5 is not None and len(gm5) > 1 else gold_price
+    gold_change = round(gold_price - gold_prev, 2)
+    gold_pct    = round((gold_change / gold_prev) * 100, 3) if gold_prev else 0.0
+    dxy_prev    = float(dm5["close"].iloc[-2]) if dm5 is not None and len(dm5) > 1 else dxy_price
+    dxy_change  = round(dxy_price - dxy_prev, 4)
+
+    corr_curr = 0.0
+    if gm5 is not None and dm5 is not None and len(gm5) >= CORR_WINDOW:
+        s = rolling_corr(gm5["close"], dm5["close"], CORR_WINDOW).dropna()
+        if not s.empty:
+            corr_curr = round(float(s.iloc[-1]), 4)
+
+    sig: Dict = {
+        "direction": "WAIT", "anticipation": None, "confidence": 0,
+        "corr": corr_curr, "gold_price": gold_price, "dxy_price": dxy_price,
+        "entry": 0.0, "tp": 0.0, "sl": 0.0, "rr": 0.0,
+        "sl_source": "—", "pipeline_state": pipeline_state,
+    }
+    if current_signal:
+        sig.update({
+            "direction":  current_signal.get("direction",  "WAIT"),
+            "confidence": current_signal.get("confidence", 0),
+            "corr":       current_signal.get("corr_curr",  corr_curr),
+            "entry":      current_signal.get("entry",  0.0),
+            "tp":         current_signal.get("tp",     0.0),
+            "sl":         current_signal.get("sl",     0.0),
+            "rr":         current_signal.get("rr",     0.0),
+            "sl_source":  current_signal.get("sl_source", "ATR"),
+        })
+
+    mtf: Dict = {}
+    if mtf_results:
+        for tf_n, res in mtf_results.items():
+            mtf[tf_n] = {
+                "signal":       res.get("direction", "WAIT") if res else "WAIT",
+                "corr":         res.get("corr_curr", 0.0)    if res else 0.0,
+                "trend":        res.get("gold_trend", "—")   if res else "—",
+                "anticipation": None,
+            }
+
+    stats = history.get_stats()
+    payload = {
+        "gold_price":    gold_price,
+        "dxy_price":     dxy_price,
+        "gold_bid":      round(gold_price - 0.15, 2),
+        "gold_ask":      round(gold_price + 0.15, 2),
+        "gold_change":   gold_change,
+        "gold_pct":      gold_pct,
+        "dxy_change":    dxy_change,
+        "correlation":   corr_curr,
+        "signal":        sig,
+        "mtf":           mtf,
+        "ohlcv":         {tf_n: _df_to_ohlcv(gold_dfs.get(tf_n), 200) for tf_n in ["M5","M15","H1"]},
+        "signals":       history.to_list(),
+        "winrate":       stats["winrate"],
+        "wins":          stats["wins"],
+        "losses":        stats["losses"],
+        "bot_status":    "running",
+        "mt5_connected": mt5_connected,
+        "gold_symbol":   gold_symbol or "XAUUSD",
+        "last_update":   datetime.now().isoformat(),
+    }
+
+    try:
+        r = requests.post(f"{API_URL}/api/snapshot/push",
+                          json=payload, headers=API_HEADERS, timeout=4)
+        if r.status_code == 200:
+            log.debug("Snapshot pushé ✅")
+        else:
+            log.warning(f"Snapshot push status: {r.status_code}")
+    except requests.exceptions.ConnectionError:
+        log.debug("API non joignable")
+    except Exception as e:
+        log.warning(f"Snapshot push erreur: {e}")
+
+
+def push_signal_to_api(direction: str, tf: str, entry: float, tp: float,
+                        sl: float, rr: float, sl_source: str,
+                        corr: float, confidence: int) -> None:
+    try:
+        r = requests.post(f"{API_URL}/api/signal/push", headers=API_HEADERS, timeout=4,
+                          json={"direction": direction, "tf": tf, "entry": entry,
+                                "tp": tp, "sl": sl, "rr": rr, "sl_source": sl_source,
+                                "corr": corr, "confidence": confidence,
+                                "result": "OPEN", "time": datetime.now().isoformat()})
+        if r.status_code == 200:
+            log.info("Signal pushé à l'API ✅")
+        else:
+            log.warning(f"Signal push status: {r.status_code}")
+    except Exception as e:
+        log.warning(f"Signal push échoué: {e}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  TELEGRAM
@@ -310,307 +472,290 @@ def analyze_tf(tf_name: str, tf_mt5, n_bars: int) -> Optional[Dict]:
 
 def send_telegram(text: str) -> bool:
     if TELEGRAM_TOKEN == "VOTRE_TOKEN_ICI":
-        print("\n" + "═"*55)
         import re
+        print("\n" + "═"*55)
         print(re.sub(r"<[^>]+>", "", text))
         print("═"*55 + "\n")
         return False
     try:
-        url  = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-        resp = requests.post(url, json={
-            "chat_id"    : TELEGRAM_CHAT_ID,
-            "text"       : text,
-            "parse_mode" : "HTML",
-        }, timeout=10)
-        if resp.status_code == 200:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "HTML"},
+            timeout=10)
+        ok = resp.status_code == 200
+        if ok:
             log.info("✅ Telegram envoyé")
-            return True
         else:
-            log.error(f"Telegram erreur: {resp.text}")
-            return False
+            log.error(f"Telegram erreur {resp.status_code}: {resp.text[:100]}")
+        return ok
     except Exception as e:
-        log.error(f"Telegram exception: {e}")
-        return False
+        log.error(f"Telegram exception: {e}"); return False
+
+
+def _stars(c: int) -> str:
+    return "⭐⭐⭐" if c >= 75 else ("⭐⭐" if c >= 55 else "⭐")
+
 
 def msg_startup() -> str:
-    now = datetime.now().strftime("%d/%m/%Y à %H:%M")
-    smart_tag = "🧠 SL intelligent (zones)" if SMART_RISK else "📐 SL ATR (basique)"
+    now  = datetime.now().strftime("%d/%m/%Y à %H:%M")
+    mode = "🧠 SL intelligent (risk.py)" if SMART_RISK else "📐 SL ATR basique"
     return (
-        f"🚀 <b>Gold Signal Bot — Démarré</b>\n"
+        f"🚀 <b>Gold/DXY Signal Bot — Démarré</b>\n"
         f"{'─'*32}\n"
-        f"📌 Actifs analysés :\n"
-        f"   • Or : <b>{gold_symbol}</b>\n"
-        f"   • DXY: <b>{dxy_symbol}</b>\n\n"
-        f"📊 Stratégie : Cassure de corrélation Gold/DXY\n"
-        f"🕐 Timeframes : H1 → M15 → M5\n"
-        f"🔄 Scan toutes les <b>60 secondes</b>\n"
-        f"⚙️  Mode SL : {smart_tag}\n\n"
-        f"⚙️ Paramètres :\n"
-        f"   Fenêtre corrélation : {CORR_WINDOW} bougies\n"
-        f"   Seuil normal        : &lt; {CORR_NORMAL_THRESH}\n"
-        f"   Seuil cassure       : &gt; {CORR_BREAK_THRESH}\n"
+        f"📌 <b>Actifs :</b>\n"
+        f"   • Or  : <b>{gold_symbol}</b>\n"
+        f"   • DXY : <b>{dxy_symbol}</b>\n\n"
+        f"📊 Stratégie : Corrélation négative persistante GOLD/DXY\n"
+        f"🕐 Pipeline  : H1 → M15 → M5\n"
+        f"🔄 Scan      : toutes les <b>{LOOP_INTERVAL_SEC}s</b>\n"
+        f"⚙️ SL Mode   : {mode}\n\n"
+        f"⚙️ <b>Seuils :</b>\n"
+        f"   H1      : corr &lt; {CORR_SIGNAL_THRESH}\n"
+        f"   M15/M5  : corr &lt; {CORR_CONFIRM_THRESH}\n"
+        f"   Cooldown : {SIGNAL_COOLDOWN_SEC//60}min\n"
         f"{'─'*32}\n"
-        f"⏰ {now}\n"
+        f"⏰ {now} | MT5 : {'✅ Live' if mt5_connected else '🟡 Simulation'}\n"
         f"<i>En attente des signaux...</i>"
     )
 
-def msg_h1_signal(sig: Dict, winrate: float, n_signals: int) -> str:
-    d   = sig["direction"]
-    emo = "🔴 SELL" if d == "SELL" else "🟢 BUY"
-    arr = "📉" if d == "SELL" else "📈"
-    now = datetime.now().strftime("%H:%M")
-    reason = (
-        "DXY en hausse → Dollar fort → pression baissière sur l'or"
-        if d == "SELL" else
-        "DXY en baisse → Dollar faible → or attractif"
-    )
+
+def msg_h1_signal(sig: Dict, winrate: float) -> str:
+    d      = sig["direction"]
+    reason = "DXY↑ → Dollar fort → pression baissière or" if d == "SELL" else "DXY↓ → Dollar faible → or attractif"
     return (
-        f"{arr} <b>{emo} GOLD</b> — Signal H1\n"
-        f"{'─'*32}\n"
-        f"⚠️ <b>Cassure de corrélation Gold/DXY</b>\n\n"
-        f"📊 <b>Corrélation Gold/DXY :</b>\n"
-        f"<code>  Avant : {sig['corr_prev']:+.3f}  →  Maintenant : {sig['corr_curr']:+.3f}</code>\n\n"
-        f"📈 <b>Tendances :</b>\n"
-        f"   • Gold : {sig['gold_trend']} ({sig['gold_pct']:+.2f}%) @ <b>{sig['gold_price']}</b>\n"
-        f"   • DXY  : {sig['dxy_trend']} ({sig['dxy_pct']:+.3f}) @ {sig['dxy_price']}\n\n"
-        f"💡 <b>Raison :</b> {reason}\n\n"
-        f"🎯 <b>Winrate calculé :</b> {winrate}% "
-        f"<i>({n_signals} signaux analysés)</i>\n\n"
-        f"⏳ <b>En attente confirmation M15...</b>\n"
-        f"{'─'*32}\n"
-        f"⏰ {now} | Timeframe : H1"
+        f"{'📉' if d=='SELL' else '📈'} <b>{'🔴 SELL' if d=='SELL' else '🟢 BUY'} GOLD</b> — Alerte H1\n"
+        f"{'─'*30}\n"
+        f"📊 Corr : <code>{sig['corr_prev']:+.3f} → {sig['corr_curr']:+.3f}</code>\n"
+        f"📈 Gold : {sig['gold_trend']} ({sig['gold_pct']:+.2f}%) @ <b>{sig['gold_price']}</b>\n"
+        f"💵 DXY  : {sig['dxy_trend']} ({sig['dxy_pct']:+.4f}%) @ {sig['dxy_price']}\n"
+        f"🔥 Confiance : <b>{sig['confidence']}%</b> {_stars(sig['confidence'])}\n"
+        f"💡 {reason}\n"
+        f"{'─'*30}\n"
+        f"⏳ <b>Attente confirmation M15...</b>\n"
+        f"⏰ {datetime.now().strftime('%H:%M')} | H1"
     )
+
 
 def msg_m15_confirmation(sig: Dict, winrate: float) -> str:
-    d   = sig["direction"]
-    emo = "🔴 SELL" if d == "SELL" else "🟢 BUY"
-    now = datetime.now().strftime("%H:%M")
+    d = sig["direction"]
     return (
-        f"✅ <b>Confirmation M15 — {emo} GOLD</b>\n"
-        f"{'─'*32}\n"
-        f"📊 <b>Corrélation M15 :</b>\n"
-        f"<code>  Avant : {sig['corr_prev']:+.3f}  →  Maintenant : {sig['corr_curr']:+.3f}</code>\n\n"
-        f"📈 <b>Tendances M15 :</b>\n"
-        f"   • Gold : {sig['gold_trend']} ({sig['gold_pct']:+.2f}%)\n"
-        f"   • DXY  : {sig['dxy_trend']} ({sig['dxy_pct']:+.3f})\n\n"
-        f"🎯 <b>Winrate :</b> {winrate}%\n\n"
-        f"⏳ <b>En attente confirmation M5 pour entrée...</b>\n"
-        f"{'─'*32}\n"
-        f"⏰ {now} | Timeframe : M15"
+        f"✅ <b>Confirmation M15 — {'🔴 SELL' if d=='SELL' else '🟢 BUY'} GOLD</b>\n"
+        f"{'─'*30}\n"
+        f"📊 Corr M15 : <code>{sig['corr_prev']:+.3f} → {sig['corr_curr']:+.3f}</code>\n"
+        f"📈 Gold : {sig['gold_trend']} ({sig['gold_pct']:+.2f}%)\n"
+        f"💵 DXY  : {sig['dxy_trend']} ({sig['dxy_pct']:+.4f}%)\n"
+        f"🔥 Confiance : <b>{sig['confidence']}%</b>\n"
+        f"{'─'*30}\n"
+        f"⏳ <b>Attente confirmation M5 pour entrée...</b>\n"
+        f"⏰ {datetime.now().strftime('%H:%M')} | M15"
     )
 
-def msg_m5_entry(sig: Dict, winrate: float, n_signals: int) -> str:
-    d   = sig["direction"]
-    emo = "🔴 SELL" if d == "SELL" else "🟢 BUY"
-    arr = "📉" if d == "SELL" else "📈"
-    now = datetime.now().strftime("%H:%M")
 
-    # ── Calcul SL/TP : smart si disponible, ATR sinon ─────────────────────
-    if SMART_RISK:
-        entry, tp, sl, atr, rr, sl_source = _smart_sl_tp(d, sig["gold_df"])
-        sl_label = f"🧠 {sl_source}"
-    else:
-        entry, tp, sl, atr, rr = compute_tp_sl(d, sig["gold_df"])
-        sl_source = "ATR"
-        sl_label  = "📐 ATR basique"
-
-    quality_stars = "⭐⭐⭐" if winrate > 65 else "⭐⭐" if winrate > 55 else "⭐"
-
+def msg_m5_entry(sig: Dict, entry: float, tp: float, sl: float,
+                 rr: float, sl_source: str, winrate: float) -> str:
+    d = sig["direction"]
     return (
-        f"{arr} <b>ENTRÉE {emo} GOLD</b> — Confirmé M5\n"
-        f"{'═'*32}\n"
-        f"🎯 <b>SETUP COMPLET — H1 + M15 + M5</b>\n\n"
-        f"💰 <b>Niveaux de trading :</b>\n"
-        f"   • Entrée : <b>{entry}</b>\n"
-        f"   • TP     : <b>{tp}</b> 🟢\n"
-        f"   • SL     : <b>{sl}</b> 🔴\n"
-        f"   • R/R    : <b>1 : {rr}</b>\n"
-        f"   • SL src : {sl_label}\n\n"
-        f"📊 <b>Corrélation M5 :</b>\n"
-        f"<code>  {sig['corr_prev']:+.3f} → {sig['corr_curr']:+.3f}</code>\n\n"
-        f"📈 <b>Contexte :</b>\n"
-        f"   • Gold : {sig['gold_trend']} ({sig['gold_pct']:+.2f}%)\n"
-        f"   • DXY  : {sig['dxy_trend']} ({sig['dxy_pct']:+.3f})\n"
-        f"   • ATR  : {atr} pts\n\n"
-        f"🏆 <b>Qualité du signal :</b> {quality_stars}\n"
-        f"📈 <b>Winrate calculé :</b> {winrate}% "
-        f"<i>({n_signals} signaux)</i>\n"
-        f"{'═'*32}\n"
-        f"⏰ {now}\n"
-        f"<i>⚡ Signal automatique — Pas un conseil financier</i>"
+        f"{'📉' if d=='SELL' else '📈'} <b>ENTRÉE {'🔴 SELL' if d=='SELL' else '🟢 BUY'} GOLD — M5 Confirmé</b>\n"
+        f"{'═'*30}\n"
+        f"🎯 <b>SETUP COMPLET H1 + M15 + M5</b>\n\n"
+        f"💰 <b>Niveaux :</b>\n"
+        f"   Entrée : <b>{entry}</b>\n"
+        f"   TP     : <b>{tp}</b> 🟢\n"
+        f"   SL     : <b>{sl}</b> 🔴\n"
+        f"   R/R    : <b>1:{rr}</b>\n"
+        f"   SL src : {sl_source}\n\n"
+        f"📊 Corr M5 : <code>{sig['corr_prev']:+.3f} → {sig['corr_curr']:+.3f}</code>\n"
+        f"📈 Gold : {sig['gold_trend']} | DXY : {sig['dxy_trend']}\n"
+        f"🔥 Confiance : <b>{sig['confidence']}%</b> {_stars(sig['confidence'])}\n"
+        f"📈 Winrate : {winrate}%\n"
+        f"{'═'*30}\n"
+        f"⏰ {datetime.now().strftime('%H:%M')}\n"
+        f"<i>⚡ Signal algo — pas un conseil financier</i>"
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  GESTION DES ÉTATS (pipeline H1 → M15 → M5)
+#  PIPELINE H1 → M15 → M5
 # ─────────────────────────────────────────────────────────────────────────────
 
 class SignalPipeline:
     def __init__(self):
-        self.state          = "IDLE"
-        self.direction      = None
-        self.h1_signal      = None
-        self.m15_signal     = None
-        self.started_at     = None
-        self.last_full_sig  = {}
-        self.cycle          = 0
+        self.state               = "IDLE"
+        self.direction: Optional[str]   = None
+        self.h1_signal: Optional[Dict]  = None
+        self.m15_signal: Optional[Dict] = None
+        self.h1_at: Optional[datetime]  = None
+        self.m15_at: Optional[datetime] = None
+        self.last_full_sig: Dict[str, datetime] = {}
+        self.cycle = 0
+        self.current_entry_signal: Optional[Dict] = None
 
-    def reset(self):
-        self.state      = "IDLE"
-        self.direction  = None
-        self.h1_signal  = None
-        self.m15_signal = None
-        self.started_at = None
-        log.info("Pipeline réinitialisé → IDLE")
+    def reset(self, reason: str = "") -> None:
+        if reason: log.info(f"Pipeline reset → IDLE ({reason})")
+        self.state = "IDLE"; self.direction = None
+        self.h1_signal = None; self.m15_signal = None
+        self.h1_at = None; self.m15_at = None
+        self.current_entry_signal = None
 
-    def timeout_check(self):
-        if self.started_at is None:
-            return
-        elapsed = (datetime.now() - self.started_at).total_seconds()
-        if elapsed > 14400:
-            log.info("Pipeline expiré (> 4h) → reset")
-            self.reset()
-
-    def _is_duplicate(self, direction: str) -> bool:
-        if direction in self.last_full_sig:
-            elapsed = (datetime.now() - self.last_full_sig[direction]).total_seconds()
-            return elapsed < SIGNAL_COOLDOWN_SEC
+    def _timeout_check(self) -> bool:
+        now = datetime.now()
+        if self.state == "WAIT_M15" and self.h1_at:
+            if (now - self.h1_at).total_seconds() > H1_TO_M15_TIMEOUT_MIN * 60:
+                self.reset(f"H1→M15 timeout ({H1_TO_M15_TIMEOUT_MIN}min)"); return True
+        if self.state == "WAIT_M5" and self.m15_at:
+            if (now - self.m15_at).total_seconds() > M15_TO_M5_TIMEOUT_MIN * 60:
+                self.reset(f"M15→M5 timeout ({M15_TO_M5_TIMEOUT_MIN}min)"); return True
         return False
 
-    def process(self, h1: Optional[Dict], m15: Optional[Dict], m5: Optional[Dict]):
+    def _is_cooldown(self, direction: str) -> bool:
+        if direction in self.last_full_sig:
+            elapsed = (datetime.now() - self.last_full_sig[direction]).total_seconds()
+            if elapsed < SIGNAL_COOLDOWN_SEC:
+                log.info(f"Cooldown {direction}: {int((SIGNAL_COOLDOWN_SEC-elapsed)/60)}min restantes")
+                return True
+        return False
+
+    @staticmethod
+    def _elapsed(since: Optional[datetime]) -> int:
+        return 0 if since is None else int((datetime.now() - since).total_seconds() / 60)
+
+    def process(self, h1: Optional[Dict], m15: Optional[Dict],
+                m5: Optional[Dict]) -> Optional[Dict]:
         self.cycle += 1
-        self.timeout_check()
-        winrate   = history.get_winrate()
-        n_signals = history.get_signal_count()
+        if self._timeout_check(): return None
+        winrate = history.get_winrate()
 
         if self.state == "IDLE":
-            if h1 is None:
-                log.info("Aucun signal H1 détecté")
-                return
-            direction = h1["direction"]
-            if self._is_duplicate(direction):
-                log.info(f"Signal {direction} déjà envoyé récemment — cooldown")
-                return
-            quality = history.add(direction, h1["corr_prev"], h1["corr_curr"], h1["dxy_pct"])
-            winrate = history.get_winrate()
-            log.info(f"🔔 SIGNAL H1 {direction} | Qualité: {quality}% | Winrate: {winrate}%")
-            send_telegram(msg_h1_signal(h1, winrate, n_signals))
-            self.state      = "WAIT_M15"
-            self.direction  = direction
-            self.h1_signal  = h1
-            self.started_at = datetime.now()
+            if h1 is None: log.info("Pas de signal H1"); return None
+            if self._is_cooldown(h1["direction"]): return None
+            log.info(f"🔔 H1 {h1['direction']} | Conf={h1['confidence']}% | Corr={h1['corr_curr']:+.3f}")
+            send_telegram(msg_h1_signal(h1, winrate))
+            self.state = "WAIT_M15"; self.direction = h1["direction"]
+            self.h1_signal = h1; self.h1_at = datetime.now()
+            return None
 
         elif self.state == "WAIT_M15":
             if m15 is None:
-                log.info(f"En attente confirmation M15 pour {self.direction}...")
-                return
+                log.info(f"Attente M15 pour {self.direction}... ({self._elapsed(self.h1_at)}min)")
+                return None
             if m15["direction"] != self.direction:
-                log.info(f"M15 signal contradictoire ({m15['direction']} vs {self.direction}) → reset")
-                self.reset()
-                return
-            log.info(f"✅ Confirmation M15 {self.direction}")
+                self.reset(f"M15 contradictoire ({m15['direction']} vs {self.direction})"); return None
+            log.info(f"✅ M15 confirmé {self.direction} | Conf={m15['confidence']}%")
             send_telegram(msg_m15_confirmation(m15, winrate))
-            self.state      = "WAIT_M5"
-            self.m15_signal = m15
+            self.state = "WAIT_M5"; self.m15_signal = m15; self.m15_at = datetime.now()
+            return None
 
         elif self.state == "WAIT_M5":
             if m5 is None:
-                log.info(f"En attente confirmation M5 pour {self.direction}...")
-                return
+                log.info(f"Attente M5 pour {self.direction}... ({self._elapsed(self.m15_at)}min)")
+                return None
             if m5["direction"] != self.direction:
-                log.info(f"M5 signal contradictoire → reset")
-                self.reset()
-                return
+                self.reset(f"M5 contradictoire ({m5['direction']} vs {self.direction})"); return None
 
-            log.info(f"✅ Confirmation M5 {self.direction} — envoi signal entrée complet")
-            send_telegram(msg_m5_entry(m5, winrate, n_signals))
-            # ── Envoi au dashboard ──
-            try:
-                if SMART_RISK:
-                    entry, tp, sl, atr, rr, sl_source = _smart_sl_tp(m5["direction"], m5["gold_df"])
-                else:
-                    entry, tp, sl, atr, rr = compute_tp_sl(m5["direction"], m5["gold_df"])
+            gold_df = m5.get("gold_df")
+            if SMART_RISK and gold_df is not None:
+                try:
+                    entry, tp, sl, atr, rr, sl_source = _smart_sl_tp(m5["direction"], gold_df)
+                except Exception as e:
+                    log.warning(f"smart_sl_tp échoué: {e} — fallback ATR")
+                    entry, tp, sl, atr, rr = compute_tp_sl(m5["direction"], gold_df)
                     sl_source = "ATR"
+            else:
+                entry, tp, sl, atr, rr = compute_tp_sl(m5["direction"], gold_df) if gold_df is not None else (0,0,0,0,0)
+                sl_source = "ATR"
 
-                requests.post(f"{API_URL}/api/signal/push", json={
-                    "direction": m5["direction"],
-                    "tf": "M5",
-                    "entry": entry,
-                    "tp": tp,
-                    "sl": sl,
-                    "rr": rr,
-                    "sl_source": sl_source,
-                    "corr": m5["corr_curr"],
-                }, headers=API_HEADERS, timeout=3)
-            except Exception as e:
-                log.warning(f"Dashboard push échoué: {e}")
+            confidence = m5.get("confidence", 0)
+            log.info(f"✅ M5 {self.direction} | Entry={entry} TP={tp} SL={sl} R/R=1:{rr}")
+            send_telegram(msg_m5_entry(m5, entry, tp, sl, rr, sl_source, winrate))
 
-            # ── Sauvegarde signal pour le dashboard ──────────────────────────
-            try:
-                requests.post(f"{API_URL}/api/signal/push", json={
-                    "direction": m5["direction"],
-                    "tf": "M5",
-                    "entry": entry,
-                    "tp": tp,
-                    "sl": sl,
-                    "rr": rr,
-                    "sl_source": sl_source,
-                    "corr": m5["corr_curr"],
-                    "result": "OPEN",
-                }, headers=API_HEADERS, timeout=3)
-                log.info("Signal envoyé au dashboard API ✅")
-            except Exception as e:
-                log.warning(f"API push échoué (normal si api_server non lancé): {e}")
+            history.add(direction=self.direction, corr=m5["corr_curr"],
+                        confidence=confidence, entry=entry, tp=tp, sl=sl, rr=rr)
+            push_signal_to_api(direction=self.direction, tf="M5",
+                               entry=entry, tp=tp, sl=sl, rr=rr,
+                               sl_source=sl_source, corr=m5["corr_curr"],
+                               confidence=confidence)
 
+            entry_signal = {"direction": self.direction, "confidence": confidence,
+                            "corr_curr": m5["corr_curr"], "entry": entry,
+                            "tp": tp, "sl": sl, "rr": rr, "sl_source": sl_source}
+            self.current_entry_signal = entry_signal
             self.last_full_sig[self.direction] = datetime.now()
-            self.reset()
+            self.reset("signal complet envoyé")
+            return entry_signal
 
+        return None
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  BOUCLE PRINCIPALE
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
-    log.info("=" * 55)
-    log.info("  GOLD / DXY SIGNAL SYSTEM — DÉMARRAGE")
-    log.info(f"  Mode SL : {'INTELLIGENT (zones)' if SMART_RISK else 'BASIQUE (ATR)'}")
-    log.info(f"  Dashboard : {'ACTIVÉ' if DASHBOARD_OK else 'DÉSACTIVÉ'}")
-    log.info("=" * 55)
+    log.info("=" * 60)
+    log.info("  GOLD / DXY SIGNAL SYSTEM v2.1 — DÉMARRAGE")
+    log.info(f"  SL Mode : {'INTELLIGENT (risk.py)' if SMART_RISK else 'ATR basique'}")
+    log.info(f"  MT5     : {'disponible' if MT5_AVAILABLE else 'non disponible → simulation'}")
+    log.info(f"  API     : {API_URL}")
+    log.info("=" * 60)
 
     mt5_ok = connect_mt5()
-    if not mt5_ok and MT5_AVAILABLE:
-        log.error("Impossible de se connecter à MT5. Vérifiez que MT5 est ouvert.")
+    if MT5_AVAILABLE and not mt5_ok:
+        log.error("Impossible de connecter MT5. Assurez-vous que MT5 est ouvert.")
         return
 
+    TF_MAP = {"H1": None, "M15": None, "M5": None}
+    if MT5_AVAILABLE and mt5_ok:
+        TF_MAP = {"H1": mt5.TIMEFRAME_H1, "M15": mt5.TIMEFRAME_M15, "M5": mt5.TIMEFRAME_M5}
+
+    # ── Message Telegram démarrage ────────────────────────────────────────────
+    log.info("Envoi message Telegram de démarrage...")
     send_telegram(msg_startup())
 
-    if MT5_AVAILABLE:
-        TF_H1  = mt5.TIMEFRAME_H1
-        TF_M15 = mt5.TIMEFRAME_M15
-        TF_M5  = mt5.TIMEFRAME_M5
-    else:
-        TF_H1 = TF_M15 = TF_M5 = None
-
     pipeline = SignalPipeline()
-    log.info(f"Boucle démarrée — scan toutes les {LOOP_INTERVAL_SEC}s")
-    log.info("Appuyer Ctrl+C pour arrêter\n")
+    gold_dfs: Dict[str, Optional[pd.DataFrame]] = {"M5": None, "M15": None, "H1": None}
+    dxy_dfs:  Dict[str, Optional[pd.DataFrame]] = {"M5": None, "M15": None, "H1": None}
+
+    log.info(f"Boucle démarrée — scan toutes les {LOOP_INTERVAL_SEC}s | Ctrl+C pour arrêter\n")
 
     try:
         while True:
+            t0 = time.time()
             log.info(f"─── Cycle #{pipeline.cycle + 1} | {datetime.now().strftime('%H:%M:%S')} ───")
             try:
-                h1_sig  = analyze_tf("H1",  TF_H1,  120)
-                m15_sig = analyze_tf("M15", TF_M15, 150)
-                m5_sig  = analyze_tf("M5",  TF_M5,  200)
+                if mt5_ok:
+                    for tf_n, n_b in [("H1", 120), ("M15", 150), ("M5", 200)]:
+                        gold_dfs[tf_n] = get_ohlc(gold_symbol, TF_MAP[tf_n], n_b)
+                        dxy_dfs[tf_n]  = get_ohlc(dxy_symbol,  TF_MAP[tf_n], n_b)
+                else:
+                    for tf_n, n_b, tf_min in [("H1",120,60), ("M15",150,15), ("M5",200,5)]:
+                        gold_dfs[tf_n], dxy_dfs[tf_n] = _simulate_correlated(n_b, tf_min)
+
+                h1_sig  = analyze_tf("H1",  TF_MAP["H1"],  120, gold_dfs["H1"],  dxy_dfs["H1"])
+                m15_sig = analyze_tf("M15", TF_MAP["M15"], 150, gold_dfs["M15"], dxy_dfs["M15"])
+                m5_sig  = analyze_tf("M5",  TF_MAP["M5"],  200, gold_dfs["M5"],  dxy_dfs["M5"])
+
                 pipeline.process(h1_sig, m15_sig, m5_sig)
+
+                push_snapshot(
+                    pipeline_state = pipeline.state,
+                    gold_dfs       = gold_dfs,
+                    dxy_dfs        = dxy_dfs,
+                    current_signal = pipeline.current_entry_signal,
+                    mtf_results    = {"H1": h1_sig, "M15": m15_sig, "M5": m5_sig},
+                )
+
             except Exception as e:
                 log.error(f"Erreur cycle: {e}", exc_info=True)
-            time.sleep(LOOP_INTERVAL_SEC)
+
+            elapsed = time.time() - t0
+            sleep_t = max(0, LOOP_INTERVAL_SEC - elapsed)
+            log.info(f"Cycle terminé en {elapsed:.1f}s — prochaine analyse dans {sleep_t:.0f}s\n")
+            time.sleep(sleep_t)
 
     except KeyboardInterrupt:
         log.info("\n⛔ Arrêt (Ctrl+C)")
     finally:
-        if MT5_AVAILABLE:
+        if MT5_AVAILABLE and mt5_ok:
             mt5.shutdown()
+            log.info("MT5 déconnecté.")
         log.info("Système arrêté.")
 
 
