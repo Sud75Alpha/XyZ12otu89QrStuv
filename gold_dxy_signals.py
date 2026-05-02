@@ -214,7 +214,14 @@ def get_ohlc(symbol: str, tf_mt5, n_bars: int) -> Optional[pd.DataFrame]:
         df = pd.DataFrame(rates)
         df["time"] = pd.to_datetime(df["time"], unit="s")
         df.set_index("time", inplace=True)
-        return df[["open", "high", "low", "close", "tick_volume"]]
+        df = df[["open", "high", "low", "close", "tick_volume"]].copy()
+        # Normalisation Exness : XAUUSDm coté en cents (close > 3000) → /2
+        if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
+            if df["close"].iloc[-1] > 3000:
+                for col in ["open", "high", "low", "close"]:
+                    df[col] = (df[col] / 2.0).round(2)
+                log.debug(f"Prix {symbol} normalisés (÷2): {df['close'].iloc[-1]}")
+        return df
     except Exception as e:
         log.error(f"Erreur get_ohlc {symbol}: {e}"); return None
 
@@ -372,9 +379,13 @@ def push_snapshot(pipeline_state: str,
                   mtf_results:    Optional[Dict]  = None) -> None:
 
     gm5 = gold_dfs.get("M5"); dm5 = dxy_dfs.get("M5")
-    gold_price = round(float(gm5["close"].iloc[-1]), 2) if gm5 is not None and not gm5.empty else 0.0
+    _gold_raw  = round(float(gm5["close"].iloc[-1]), 2) if gm5 is not None and not gm5.empty else 0.0
+    _gold_raw2 = float(gm5["close"].iloc[-2]) if gm5 is not None and len(gm5) > 1 else _gold_raw
+    # Exness XAUUSDm coté en cents (valeur > 3000) → diviser par 2
+    _factor    = 2.0 if _gold_raw > 3000 else 1.0
+    gold_price = round(_gold_raw  / _factor, 2)
+    gold_prev  = round(_gold_raw2 / _factor, 2)
     dxy_price  = round(float(dm5["close"].iloc[-1]),  3) if dm5 is not None and not dm5.empty else 0.0
-    gold_prev  = float(gm5["close"].iloc[-2]) if gm5 is not None and len(gm5) > 1 else gold_price
     gold_change = round(gold_price - gold_prev, 2)
     gold_pct    = round((gold_change / gold_prev) * 100, 3) if gold_prev else 0.0
     dxy_prev    = float(dm5["close"].iloc[-2]) if dm5 is not None and len(dm5) > 1 else dxy_price
