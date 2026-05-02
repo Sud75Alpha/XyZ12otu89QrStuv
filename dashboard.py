@@ -28,8 +28,8 @@ st.set_page_config(
 
 # ─── CONFIG API ───────────────────────────────────────────────────────────────
 try:
-    API_URL = st.secrets["API_URL"]
-    API_KEY = st.secrets["API_KEY"]
+    API_URL = "https://en-ligne-5wi6.onrender.com"
+    API_KEY = "gold_dxy_secret_2024"
 except Exception:
     API_URL = os.getenv("API_URL", "http://localhost:8000")
     API_KEY = os.getenv("API_KEY", "gold_dxy_secret_2024")
