@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple
 import os
 
-API_URL     = os.getenv("API_URL",  "http://localhost:8000")
+API_URL     = os.getenv("API_URL",  "https://en-ligne-5wi6.onrender.com")
 API_KEY     = os.getenv("API_KEY",  "gold_dxy_secret_2024")
 API_HEADERS = {"X-API-Key": API_KEY}
 
@@ -215,12 +215,7 @@ def get_ohlc(symbol: str, tf_mt5, n_bars: int) -> Optional[pd.DataFrame]:
         df["time"] = pd.to_datetime(df["time"], unit="s")
         df.set_index("time", inplace=True)
         df = df[["open", "high", "low", "close", "tick_volume"]].copy()
-        # Normalisation Exness : XAUUSDm coté en cents (close > 3000) → /2
-        if "XAU" in symbol.upper() or "GOLD" in symbol.upper():
-            if df["close"].iloc[-1] > 3000:
-                for col in ["open", "high", "low", "close"]:
-                    df[col] = (df[col] / 2.0).round(2)
-                log.debug(f"Prix {symbol} normalisés (÷2): {df['close'].iloc[-1]}")
+        # Exness XAUUSDm : prix réel ~4613 (pas de normalisation nécessaire)
         return df
     except Exception as e:
         log.error(f"Erreur get_ohlc {symbol}: {e}"); return None
@@ -379,13 +374,10 @@ def push_snapshot(pipeline_state: str,
                   mtf_results:    Optional[Dict]  = None) -> None:
 
     gm5 = gold_dfs.get("M5"); dm5 = dxy_dfs.get("M5")
-    _gold_raw  = round(float(gm5["close"].iloc[-1]), 2) if gm5 is not None and not gm5.empty else 0.0
-    _gold_raw2 = float(gm5["close"].iloc[-2]) if gm5 is not None and len(gm5) > 1 else _gold_raw
-    # Exness XAUUSDm coté en cents (valeur > 3000) → diviser par 2
-    _factor    = 2.0 if _gold_raw > 3000 else 1.0
-    gold_price = round(_gold_raw  / _factor, 2)
-    gold_prev  = round(_gold_raw2 / _factor, 2)
-    dxy_price  = round(float(dm5["close"].iloc[-1]),  3) if dm5 is not None and not dm5.empty else 0.0
+    # Prix déjà normalisés par get_ohlc (÷2 si Exness cents) — pas de double correction
+    gold_price = round(float(gm5["close"].iloc[-1]), 2) if gm5 is not None and not gm5.empty else 0.0
+    gold_prev  = round(float(gm5["close"].iloc[-2]), 2) if gm5 is not None and len(gm5) > 1 else gold_price
+    dxy_price  = round(float(dm5["close"].iloc[-1]), 3) if dm5 is not None and not dm5.empty else 0.0
     gold_change = round(gold_price - gold_prev, 2)
     gold_pct    = round((gold_change / gold_prev) * 100, 3) if gold_prev else 0.0
     dxy_prev    = float(dm5["close"].iloc[-2]) if dm5 is not None and len(dm5) > 1 else dxy_price
@@ -452,11 +444,11 @@ def push_snapshot(pipeline_state: str,
         r = requests.post(f"{API_URL}/api/snapshot/push",
                           json=payload, headers=API_HEADERS, timeout=4)
         if r.status_code == 200:
-            log.debug("Snapshot pushé ✅")
+            log.info(f"Snapshot pushé ✅ | Gold={payload['gold_price']} Corr={payload['correlation']:+.3f}")
         else:
-            log.warning(f"Snapshot push status: {r.status_code}")
-    except requests.exceptions.ConnectionError:
-        log.debug("API non joignable")
+            log.warning(f"Snapshot push status: {r.status_code} | {r.text[:100]}")
+    except requests.exceptions.ConnectionError as e:
+        log.warning(f"API non joignable: {API_URL} — {e}")
     except Exception as e:
         log.warning(f"Snapshot push erreur: {e}")
 
