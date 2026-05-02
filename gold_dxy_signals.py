@@ -618,6 +618,26 @@ class SignalPipeline:
     def _elapsed(since: Optional[datetime]) -> int:
         return 0 if since is None else int((datetime.now() - since).total_seconds() / 60)
 
+    def get_dashboard_signal(self) -> Optional[Dict]:
+        """Signal intermédiaire pour le dashboard selon l'état du pipeline."""
+        if self.state == "IDLE":
+            return None
+        if self.state == "WAIT_M15" and self.h1_signal:
+            s = self.h1_signal
+            return {"direction": s["direction"], "confidence": s["confidence"],
+                    "corr_curr": s["corr_curr"], "entry": s["gold_price"],
+                    "tp": 0.0, "sl": 0.0, "rr": 0.0, "sl_source": "—",
+                    "anticipation": f"⏳ H1 OK — Attente M15 ({self._elapsed(self.h1_at)}min)",
+                    "pipeline_state": "WAIT_M15"}
+        if self.state == "WAIT_M5" and self.m15_signal:
+            s = self.m15_signal
+            return {"direction": s["direction"], "confidence": s["confidence"],
+                    "corr_curr": s["corr_curr"], "entry": s["gold_price"],
+                    "tp": 0.0, "sl": 0.0, "rr": 0.0, "sl_source": "—",
+                    "anticipation": f"⏳ M15 OK — Attente M5 ({self._elapsed(self.m15_at)}min)",
+                    "pipeline_state": "WAIT_M5"}
+        return self.current_entry_signal
+
     def process(self, h1: Optional[Dict], m15: Optional[Dict],
                 m5: Optional[Dict]) -> Optional[Dict]:
         self.cycle += 1
@@ -738,7 +758,7 @@ def main():
                     pipeline_state = pipeline.state,
                     gold_dfs       = gold_dfs,
                     dxy_dfs        = dxy_dfs,
-                    current_signal = pipeline.current_entry_signal,
+                    current_signal = pipeline.get_dashboard_signal(),  # état intermédiaire inclus
                     mtf_results    = {"H1": h1_sig, "M15": m15_sig, "M5": m5_sig},
                 )
 
