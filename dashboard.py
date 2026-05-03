@@ -28,8 +28,8 @@ st.set_page_config(
 
 # ─── CONFIG API ───────────────────────────────────────────────────────────────
 try:
-    API_URL = "https://en-ligne-5wi6.onrender.com"
-    API_KEY = "gold_dxy_secret_2024"
+    API_URL = st.secrets["API_URL"]
+    API_KEY = st.secrets["API_KEY"]
 except Exception:
     API_URL = os.getenv("API_URL", "http://localhost:8000")
     API_KEY = os.getenv("API_KEY", "gold_dxy_secret_2024")
@@ -350,13 +350,15 @@ def _apply(d: Dict):
         for tf, c in d["ohlcv"].items():
             if c:
                 ss.ohlcv[tf] = c
+    # Les prix viennent directement du bot (déjà normalisés côté bot)
+    # Pas de modification supplémentaire nécessaire
 
 
 # ─── SIMULATION FALLBACK ──────────────────────────────────────────────────────
 def _simulate():
     np.random.seed(int(time.time()) % 9999)
     if ss.gold_price == 0:
-        ss.gold_price = 2320.0
+        ss.gold_price = 4613.0   # prix réel Exness XAUUSDm
         ss.dxy_price  = 104.5
     ss.gold_price   = round(ss.gold_price + np.random.normal(0, .12), 2)
     ss.dxy_price    = round(ss.dxy_price  + np.random.normal(0, .006), 3)
@@ -621,13 +623,18 @@ else:
 ss.tick += 1
 tf      = ss.tf
 tf_min  = {"M5": 5, "M15": 15, "H1": 60}[tf]
-gold_c  = ss.ohlcv.get(tf, []) or _sim_ohlcv(200, tf_min, "XAUUSD")
-dxy_c   = ss.ohlcv.get(tf, []) or _sim_ohlcv(200, tf_min, "DXY")
-# DXY toujours simulé si non fourni par l'API
-if not ss.ohlcv.get(tf):
-    dxy_c = _sim_ohlcv(200, tf_min, "DXY")
-else:
-    dxy_c = _sim_ohlcv(200, tf_min, "DXY")  # DXY simulé car rarement dans snapshot
+gold_c = ss.ohlcv.get(tf, [])
+dxy_c  = _sim_ohlcv(200, tf_min, "DXY")  # DXY simulé car pas dans snapshot
+# Si pas de données OHLCV Gold depuis l'API, utilise simulation avec bon prix de base
+if not gold_c:
+    _base = ss.gold_price if ss.gold_price > 100 else 4600.0
+    gold_c = _sim_ohlcv(200, tf_min, "XAUUSD")
+    # Ajuste les prix simulés au prix réel
+    if _base > 100 and gold_c:
+        _offset = _base - gold_c[-1]["close"]
+        for _c in gold_c:
+            for _k in ["open","high","low","close"]:
+                _c[_k] = round(_c[_k] + _offset, 2)
 
 signal   = ss.signal if isinstance(ss.signal, dict) else _INIT["signal"]
 zones    = ss.zones  if isinstance(ss.zones,  dict) else _INIT["zones"]
