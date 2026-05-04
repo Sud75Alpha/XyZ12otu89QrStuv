@@ -1,7 +1,12 @@
 """
 ╔══════════════════════════════════════════════════════════════════════════════╗
-║              GOLD / DXY — SYSTÈME DE SIGNAUX PROGRESSIFS v2.1               ║
+║              GOLD / DXY — SYSTÈME DE SIGNAUX PROGRESSIFS v3.0               ║
 ║         H1 (alerte) → M15 (confirmation) → M5 (entrée + TP/SL)             ║
+║                                                                              ║
+║  NOUVEAU v3.0 :                                                              ║
+║  ✅ Filtre calendrier économique (NFP, CPI, Fed ±30min)                     ║
+║  ✅ Gestion du capital (lot size dynamique, risque 1-2%)                    ║
+║  ✅ Filtre sessions London + New York                                        ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
 """
 
@@ -10,7 +15,7 @@ import logging
 import requests
 import numpy as np
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, List, Tuple
 import os
 
@@ -49,8 +54,8 @@ DXY_SYMBOLS  = ["DXY", "USDX", "USDIndex", "DX-Y.NYB", "DXYF", "DXYm"]
 
 # Corrélation
 CORR_WINDOW         = 50
-CORR_SIGNAL_THRESH  = -0.60   # H1 (assoupli pour DXYm)
-CORR_CONFIRM_THRESH = -0.50   # M15/M5
+CORR_SIGNAL_THRESH  = -0.60
+CORR_CONFIRM_THRESH = -0.50
 CORR_BREAK_THRESH   = -0.20
 
 # TP/SL ATR fallback
@@ -66,8 +71,38 @@ M15_TO_M5_TIMEOUT_MIN = 30
 SIGNAL_COOLDOWN_SEC = 3600
 
 # Boucle
-LOOP_INTERVAL_SEC = 60
+PRICE_REFRESH_SEC = 5
+SIGNAL_SCAN_SEC   = 60
+LOOP_INTERVAL_SEC = 5
 LOG_FILE          = "gold_dxy.log"
+
+# ── FILTRE SESSIONS ────────────────────────────────────────────────────────────
+# Heures UTC
+SESSION_LONDON_START = 8    # 08:00 UTC
+SESSION_LONDON_END   = 12   # 12:00 UTC
+SESSION_NY_START     = 13   # 13:00 UTC
+SESSION_NY_END       = 17   # 17:00 UTC
+SESSION_FILTER_ENABLED = True   # False = toutes les sessions autorisées
+
+# ── GESTION DU CAPITAL ─────────────────────────────────────────────────────────
+RISK_PERCENT       = 1.5    # % du capital risqué par trade (1-2% recommandé)
+ACCOUNT_BALANCE    = 0.0    # mis à jour dynamiquement depuis MT5
+GOLD_PIP_VALUE     = 1.0    # valeur d'1 pip en USD pour 0.01 lot (XAUUSDm)
+MIN_LOT            = 0.01
+MAX_LOT            = 1.0
+LOT_STEP           = 0.01
+
+# ── FILTRE CALENDRIER ÉCONOMIQUE ───────────────────────────────────────────────
+NEWS_FILTER_ENABLED  = True
+NEWS_BLOCK_MIN_BEFORE = 30   # bloquer N minutes AVANT la news
+NEWS_BLOCK_MIN_AFTER  = 30   # bloquer N minutes APRÈS la news
+NEWS_CACHE_TTL        = 3600 # rafraîchir le calendrier toutes les heures
+# Événements à filtrer (high impact USD)
+NEWS_KEYWORDS = [
+    "Non-Farm", "NFP", "CPI", "Fed", "FOMC", "Interest Rate",
+    "GDP", "Unemployment", "Inflation", "PPI", "PCE",
+    "Retail Sales", "ISM", "PMI Manufacturing",
+]
 
 # ─────────────────────────────────────────────────────────────────────────────
 #  LOGGING
@@ -93,8 +128,183 @@ def setup_logging() -> logging.Logger:
 log = setup_logging()
 
 # ─────────────────────────────────────────────────────────────────────────────
-#  HISTORIQUE SIGNAUX
+#  MODULE 1 — FILTRE SESSIONS (London + New York)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def is_trading_session() -> Tuple[bool, str]:
+    """
+    Vérifie si on est dans une session autorisée (London ou New York) en UTC.
+    Retourne (autorisé, raison).
+    """
+    if not SESSION_FILTER_ENABLED:
+        return True, "Filtre sessions désactivé"
+
+    now_utc = datetime.now(timezone.utc)
+    hour    = now_utc.hour
+    weekday = now_utc.weekday()  # 0=Lundi, 6=Dimanche
+
+    # Week-end : marché fermé
+    if weekday >= 5:
+        return False, f"Week-end ({['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'][weekday]})"
+
+    # London : 08h-12h UTC
+    in_london = SESSION_LONDON_START <= hour < SESSION_LONDON_END
+    # New York : 13h-17h UTC
+    in_ny     = SESSION_NY_START <= hour < SESSION_NY_END
+
+    if in_london:
+        return True, f"Session London ({hour:02d}h UTC)"
+    if in_ny:
+        return True, f"Session New York ({hour:02d}h UTC)"
+
+    return False, f"Hors session ({hour:02d}h UTC — London 08-12h, NY 13-17h)"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MODULE 2 — FILTRE CALENDRIER ÉCONOMIQUE
+# ─────────────────────────────────────────────────────────────────────────────
+
+class NewsFilter:
+    """
+    Récupère le calendrier économique depuis ForexFactory (API publique)
+    et bloque les signaux ±30min autour des news USD high-impact.
+    """
+    def __init__(self):
+        self._events: List[Dict] = []
+        self._last_fetch: float  = 0.0
+
+    def _fetch_events(self) -> None:
+        """Récupère les events du jour depuis ForexFactory RSS."""
+        try:
+            now   = datetime.now(timezone.utc)
+            url   = f"https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+            r     = requests.get(url, timeout=8)
+            if r.status_code != 200:
+                log.warning(f"Calendrier éco: status {r.status_code}")
+                return
+            data = r.json()
+            events = []
+            for ev in data:
+                # Filtre : USD, impact High
+                if ev.get("country", "").upper() != "USD":
+                    continue
+                if ev.get("impact", "").lower() not in ("high", "3"):
+                    continue
+                title = ev.get("title", "")
+                # Filtre par mot-clé
+                if not any(kw.lower() in title.lower() for kw in NEWS_KEYWORDS):
+                    continue
+                # Parse date
+                try:
+                    dt_str = ev.get("date", "") + " " + ev.get("time", "")
+                    dt = datetime.strptime(dt_str.strip(), "%Y-%m-%d %I:%M%p")
+                    dt = dt.replace(tzinfo=timezone.utc)
+                    events.append({"title": title, "time": dt})
+                except Exception:
+                    pass
+            self._events     = events
+            self._last_fetch = time.time()
+            log.info(f"Calendrier éco: {len(events)} news USD high-impact chargées")
+        except Exception as e:
+            log.warning(f"Calendrier éco fetch erreur: {e}")
+
+    def is_news_time(self) -> Tuple[bool, str]:
+        """
+        Retourne (bloqué, raison).
+        Bloqué si une news high-impact est dans ±NEWS_BLOCK_MIN minutes.
+        """
+        if not NEWS_FILTER_ENABLED:
+            return False, ""
+
+        # Rafraîchit le cache si expiré
+        if time.time() - self._last_fetch > NEWS_CACHE_TTL:
+            self._fetch_events()
+
+        now = datetime.now(timezone.utc)
+        for ev in self._events:
+            delta = (ev["time"] - now).total_seconds() / 60
+            if -NEWS_BLOCK_MIN_AFTER <= delta <= NEWS_BLOCK_MIN_BEFORE:
+                if delta >= 0:
+                    return True, f"⏰ News dans {int(delta)}min : {ev['title']}"
+                else:
+                    return True, f"⏰ News il y a {int(-delta)}min : {ev['title']}"
+        return False, ""
+
+
+news_filter = NewsFilter()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  MODULE 3 — GESTION DU CAPITAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_account_balance() -> float:
+    """Récupère le solde du compte MT5."""
+    global ACCOUNT_BALANCE
+    if MT5_AVAILABLE and mt5_connected:
+        try:
+            info = mt5.account_info()
+            if info:
+                ACCOUNT_BALANCE = float(info.balance)
+                return ACCOUNT_BALANCE
+        except Exception:
+            pass
+    return ACCOUNT_BALANCE or 1000.0  # fallback démo
+
+
+def compute_lot_size(sl_pips: float, balance: Optional[float] = None) -> float:
+    """
+    Calcule le lot size dynamique basé sur le % de risque.
+
+    Formule :
+        risk_amount = balance × RISK_PERCENT / 100
+        lot_size    = risk_amount / (sl_pips × pip_value_per_lot)
+
+    Pour XAUUSDm : 1 pip = $1 pour 0.01 lot → pip_value = $100/lot
+    """
+    if balance is None:
+        balance = get_account_balance()
+
+    if sl_pips <= 0:
+        return MIN_LOT
+
+    risk_amount      = balance * RISK_PERCENT / 100
+    pip_value_per_lot = 100.0   # $100 par lot pour XAUUSD (1 pip = $10 pour 0.1 lot)
+    raw_lot          = risk_amount / (sl_pips * pip_value_per_lot)
+
+    # Arrondi au LOT_STEP
+    lot = round(round(raw_lot / LOT_STEP) * LOT_STEP, 2)
+    lot = max(MIN_LOT, min(MAX_LOT, lot))
+
+    log.info(f"Capital: balance={balance:.0f}$ | risque={RISK_PERCENT}% "
+             f"({risk_amount:.0f}$) | SL={sl_pips:.1f}pts | lot={lot}")
+    return lot
+
+
+def compute_tp_sl_with_lot(direction: str, gold_df: pd.DataFrame,
+                            balance: Optional[float] = None,
+                            atr: Optional[float] = None
+                            ) -> Tuple[float, float, float, float, float, float]:
+    """
+    Calcule TP, SL, R/R ET lot size.
+    Retourne (entry, tp, sl, atr, rr, lot_size)
+    """
+    if atr is None:
+        atr = compute_atr(gold_df)
+    entry   = round(float(gold_df["close"].iloc[-1]), 2)
+    tp_dist = round(atr * TP_ATR_MULT, 2)
+    sl_dist = round(atr * SL_ATR_MULT, 2)
+    tp = round(entry + tp_dist, 2) if direction == "BUY" else round(entry - tp_dist, 2)
+    sl = round(entry - sl_dist, 2) if direction == "BUY" else round(entry + sl_dist, 2)
+    rr = round(tp_dist / sl_dist, 2) if sl_dist > 0 else 0.0
+
+    # SL en pips (1 pip = 0.01 pour XAUUSD, mais Exness cote en points donc 1:1)
+    sl_pips  = sl_dist   # pour XAUUSDm : 1 point = $1 par lot → sl_dist = nb points
+    lot_size = compute_lot_size(sl_pips, balance)
+
+    return entry, tp, sl, atr, rr, lot_size
+
+
 
 class SignalHistory:
     def __init__(self, max_history: int = 50):
@@ -736,41 +946,60 @@ def main():
     gold_dfs: Dict[str, Optional[pd.DataFrame]] = {"M5": None, "M15": None, "H1": None}
     dxy_dfs:  Dict[str, Optional[pd.DataFrame]] = {"M5": None, "M15": None, "H1": None}
 
-    log.info(f"Boucle démarrée — scan toutes les {LOOP_INTERVAL_SEC}s | Ctrl+C pour arrêter\n")
+    log.info(f"Boucle démarrée — prix toutes les {PRICE_REFRESH_SEC}s | signaux toutes les {SIGNAL_SCAN_SEC}s | Ctrl+C pour arrêter\n")
+
+    last_signal_scan = 0.0  # timestamp dernier scan signaux
 
     try:
         while True:
-            t0 = time.time()
-            log.info(f"─── Cycle #{pipeline.cycle + 1} | {datetime.now().strftime('%H:%M:%S')} ───")
+            t0  = time.time()
+            now = t0
+
             try:
+                # ── Récupération prix tick (toutes les 5s) ────────────────────
                 if mt5_ok:
-                    for tf_n, n_b in [("H1", 120), ("M15", 150), ("M5", 200)]:
-                        gold_dfs[tf_n] = get_ohlc(gold_symbol, TF_MAP[tf_n], n_b)
-                        dxy_dfs[tf_n]  = get_ohlc(dxy_symbol,  TF_MAP[tf_n], n_b)
+                    # Récupère seulement M5 pour le prix rapide
+                    gold_dfs["M5"] = get_ohlc(gold_symbol, TF_MAP["M5"], 200)
+                    dxy_dfs["M5"]  = get_ohlc(dxy_symbol,  TF_MAP["M5"], 200)
                 else:
-                    for tf_n, n_b, tf_min in [("H1",120,60), ("M15",150,15), ("M5",200,5)]:
-                        gold_dfs[tf_n], dxy_dfs[tf_n] = _simulate_correlated(n_b, tf_min)
+                    gold_dfs["M5"], dxy_dfs["M5"] = _simulate_correlated(200, 5)
 
-                h1_sig  = analyze_tf("H1",  TF_MAP["H1"],  120, gold_dfs["H1"],  dxy_dfs["H1"])
-                m15_sig = analyze_tf("M15", TF_MAP["M15"], 150, gold_dfs["M15"], dxy_dfs["M15"])
-                m5_sig  = analyze_tf("M5",  TF_MAP["M5"],  200, gold_dfs["M5"],  dxy_dfs["M5"])
+                # ── Scan signaux (toutes les 60s) ─────────────────────────────
+                do_scan = (now - last_signal_scan) >= SIGNAL_SCAN_SEC
+                if do_scan:
+                    log.info(f"─── Scan signaux #{pipeline.cycle + 1} | {datetime.now().strftime('%H:%M:%S')} ───")
+                    if mt5_ok:
+                        gold_dfs["H1"]  = get_ohlc(gold_symbol, TF_MAP["H1"],  120)
+                        gold_dfs["M15"] = get_ohlc(gold_symbol, TF_MAP["M15"], 150)
+                        dxy_dfs["H1"]   = get_ohlc(dxy_symbol,  TF_MAP["H1"],  120)
+                        dxy_dfs["M15"]  = get_ohlc(dxy_symbol,  TF_MAP["M15"], 150)
+                    else:
+                        gold_dfs["H1"],  dxy_dfs["H1"]  = _simulate_correlated(120, 60)
+                        gold_dfs["M15"], dxy_dfs["M15"] = _simulate_correlated(150, 15)
 
-                pipeline.process(h1_sig, m15_sig, m5_sig)
+                    h1_sig  = analyze_tf("H1",  TF_MAP["H1"],  120, gold_dfs["H1"],  dxy_dfs["H1"])
+                    m15_sig = analyze_tf("M15", TF_MAP["M15"], 150, gold_dfs["M15"], dxy_dfs["M15"])
+                    m5_sig  = analyze_tf("M5",  TF_MAP["M5"],  200, gold_dfs["M5"],  dxy_dfs["M5"])
+                    pipeline.process(h1_sig, m15_sig, m5_sig)
+                    last_signal_scan = now
+                else:
+                    # Réutilise les derniers signaux connus
+                    h1_sig = m15_sig = m5_sig = None
 
+                # ── Push snapshot prix vers dashboard (toutes les 5s) ─────────
                 push_snapshot(
                     pipeline_state = pipeline.state,
                     gold_dfs       = gold_dfs,
                     dxy_dfs        = dxy_dfs,
-                    current_signal = pipeline.get_dashboard_signal(),  # état intermédiaire inclus
-                    mtf_results    = {"H1": h1_sig, "M15": m15_sig, "M5": m5_sig},
+                    current_signal = pipeline.get_dashboard_signal(),
+                    mtf_results    = {"H1": h1_sig, "M15": m15_sig, "M5": m5_sig} if do_scan else None,
                 )
 
             except Exception as e:
                 log.error(f"Erreur cycle: {e}", exc_info=True)
 
             elapsed = time.time() - t0
-            sleep_t = max(0, LOOP_INTERVAL_SEC - elapsed)
-            log.info(f"Cycle terminé en {elapsed:.1f}s — prochaine analyse dans {sleep_t:.0f}s\n")
+            sleep_t = max(0, PRICE_REFRESH_SEC - elapsed)
             time.sleep(sleep_t)
 
     except KeyboardInterrupt:
