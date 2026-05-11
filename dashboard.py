@@ -73,6 +73,9 @@ html,body,[class*="css"]{ font-family:'JetBrains Mono',monospace!important; back
 .bs{ display:inline-block; background:rgba(255,77,106,.15); border:1px solid rgba(255,77,106,.4); color:#ff4d6a; border-radius:4px; padding:2px 8px; font-size:.64rem; font-weight:700; }
 .bw{ display:inline-block; background:rgba(107,122,148,.1); border:1px solid rgba(107,122,148,.25); color:#6b7a94; border-radius:4px; padding:2px 8px; font-size:.64rem; font-weight:700; }
 .ba{ display:inline-block; background:rgba(167,139,250,.12); border:1px solid rgba(167,139,250,.4); color:#a78bfa; border-radius:4px; padding:2px 8px; font-size:.62rem; font-weight:700; }
+.bwin{ display:inline-block; background:rgba(0,212,170,.15); border:1px solid rgba(0,212,170,.4); color:#00d4aa; border-radius:4px; padding:2px 8px; font-size:.64rem; font-weight:700; }
+.bloss{ display:inline-block; background:rgba(255,77,106,.15); border:1px solid rgba(255,77,106,.4); color:#ff4d6a; border-radius:4px; padding:2px 8px; font-size:.64rem; font-weight:700; }
+.bopen{ display:inline-block; background:rgba(77,166,255,.15); border:1px solid rgba(77,166,255,.4); color:#4da6ff; border-radius:4px; padding:2px 8px; font-size:.64rem; font-weight:700; }
 .dg{ display:inline-block;width:6px;height:6px;background:#00d4aa;border-radius:50%;box-shadow:0 0 5px #00d4aa;animation:pulse 1.4s infinite;margin-right:4px; }
 .dr{ display:inline-block;width:6px;height:6px;background:#ff4d6a;border-radius:50%;margin-right:4px; }
 .dp{ display:inline-block;width:6px;height:6px;background:#a78bfa;border-radius:50%;box-shadow:0 0 5px #a78bfa;animation:pulse 1.2s infinite;margin-right:4px; }
@@ -108,6 +111,7 @@ _INIT: Dict = {
     "zones":{"support":0.0,"resistance":0.0,"fvg_bullish":[],"fvg_bearish":[],
               "ob_buy":None,"ob_sell":None,"atr":0.0,"fvg_filter":0.0},
     "winrate":0.0,"wins":0,"losses":0,
+    "backtest_stats":{},"backtest_trades":[],"backtest_equity":[],"backtest_patterns":{},
     "bot_status":"unknown","mt5_connected":False,"gold_symbol":"XAUUSD","last_update":"—",
 }
 for k,v in _INIT.items():
@@ -341,7 +345,7 @@ def _apply(d: Dict):
     for k in ["gold_price","dxy_price","gold_bid","gold_ask","gold_change","gold_pct",
                "dxy_change","correlation","corr_history","signal","signals","bot_logs",
                "winrate","wins","losses","bot_status","mt5_connected","gold_symbol",
-               "last_update","zones"]:
+               "last_update","zones","backtest_stats","backtest_trades","backtest_equity","backtest_patterns"]:
         if k in d:
             ss[k] = d[k]
     if "mtf_analysis" in d: ss.mtf = d["mtf_analysis"]
@@ -356,7 +360,7 @@ def _apply(d: Dict):
 def _simulate():
     np.random.seed(int(time.time()) % 9999)
     if ss.gold_price == 0:
-        ss.gold_price = 2320.0
+        ss.gold_price = 4613.0
         ss.dxy_price  = 104.5
     ss.gold_price   = round(ss.gold_price + np.random.normal(0, .12), 2)
     ss.dxy_price    = round(ss.dxy_price  + np.random.normal(0, .006), 3)
@@ -371,7 +375,7 @@ def _simulate():
 
 def _sim_ohlcv(n, mins, sym):
     np.random.seed(hash(sym) % 9999)
-    base = 2320.0 if "XAU" in sym.upper() else 104.5
+    base = ss.gold_price if ("XAU" in sym.upper() and ss.gold_price > 0) else (4613.0 if "XAU" in sym.upper() else 104.5)
     vol  = 0.0006 if "XAU" in sym.upper() else 0.0003
     cl   = [base]
     for _ in range(n - 1):
@@ -844,8 +848,8 @@ with m[5]: st.metric("BID/ASK",   f"{ss.gold_bid:.2f}",       f"ASK {ss.gold_ask
 with m[6]: st.metric("R/R",       f"1:{signal.get('rr',0)}",  f"SL:{signal.get('sl_source','—')}")
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📊 Graphiques","🎯 Signal & Zones","🔀 Multi-TF","📋 Logs Bot","📜 Historique"])
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "📊 Graphiques","🎯 Signal & Zones","🔀 Multi-TF","📋 Logs Bot","📜 Historique", "🤖 Backtest"])
 
 with tab1:
     g1, g2 = st.columns(2)
@@ -1038,6 +1042,38 @@ with tab5:
         st.markdown(
             '<div style="text-align:center;padding:35px;color:#2e3a4e;font-size:.7rem;">'
             'Aucun signal enregistré.<br>Lance le bot + api_server.py</div>',
+            unsafe_allow_html=True)
+
+with tab6:
+    st.markdown('<div class="lbl">RÉSULTATS DU BACKTEST</div>', unsafe_allow_html=True)
+    if ss.backtest_stats:
+        b_winrate = ss.backtest_stats.get("winrate", 0)
+        b_pf = ss.backtest_stats.get("profit_factor", 0)
+        b_dd = ss.backtest_stats.get("max_drawdown", 0)
+        
+        bm1, bm2, bm3, bm4 = st.columns(4)
+        with bm1: st.metric("Winrate", f"{b_winrate}%")
+        with bm2: st.metric("Profit Factor", f"{b_pf:.2f}")
+        with bm3: st.metric("Drawdown Max", f"{b_dd:.2f}%")
+        with bm4: st.metric("Total Trades", ss.backtest_stats.get("total_trades", 0))
+
+        if ss.backtest_equity:
+            try:
+                eq_df = pd.DataFrame(ss.backtest_equity)
+                fig = go.Figure()
+                fig.add_trace(go.Scatter(x=eq_df["time"], y=eq_df["equity"], fill="tozeroy", line=dict(color=C["gold"])))
+                fig.update_layout(paper_bgcolor=C["bg2"], plot_bgcolor=C["bg"], height=200, margin=dict(l=0, r=0, t=10, b=0))
+                _plt(fig, key="equity_chart")
+            except Exception as e:
+                st.error(f"Erreur d'affichage de la courbe: {e}")
+        
+        if ss.backtest_patterns:
+            st.markdown('<div class="lbl" style="margin-top:10px;">Règles Apprises (learning.json)</div>', unsafe_allow_html=True)
+            st.json(ss.backtest_patterns)
+    else:
+        st.markdown(
+            '<div style="text-align:center;padding:35px;color:#2e3a4e;font-size:.7rem;">'
+            'Aucune donnée de backtest disponible.<br>Exécutez `python backtest.py` pour générer le modèle.</div>',
             unsafe_allow_html=True)
 
 st.markdown(
