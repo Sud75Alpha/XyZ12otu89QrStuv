@@ -386,6 +386,10 @@ tp_p      = float(signal.get("tp",     0.0))
 sl_p      = float(signal.get("sl",     0.0))
 rr_p      = signal.get("rr", 0.0)
 lot_p     = signal.get("lot", 0.0)
+# Valeurs formatées pour l'affichage (évite f-strings imbriquées)
+entry_fmt = f"{entry_p:,.2f}" if entry_p > 0 else "—"
+tp_fmt    = f"{tp_p:,.2f}"    if tp_p    > 0 else "—"
+sl_fmt    = f"{sl_p:,.2f}"    if sl_p    > 0 else "—"
 corr_p    = float(signal.get("corr",   corr_val))
 
 BC = {"BUY": "bb", "SELL": "bs", "WAIT": "bw"}
@@ -779,9 +783,9 @@ with st.sidebar:
         <div style="font-size:.6rem;color:#64748b;line-height:2.0;margin-top:5px;">
             Confiance: <b style="color:#e2e8f0;">{conf}%</b><br>
             Corrélation: <b style="color:#e2e8f0;">{corr_p:+.4f}</b><br>
-            Entrée: <b style="color:#f7b529;">{entry_p:,.2f if entry_p > 0 else "—"}</b><br>
-            TP: <b style="color:#00d4aa;">{tp_p:,.2f if tp_p > 0 else "—"}</b><br>
-            SL: <b style="color:#ff4d6a;">{sl_p:,.2f if sl_p > 0 else "—"}</b><br>
+            Entrée: <b style="color:#f7b529;">{entry_fmt}</b><br>
+            TP: <b style="color:#00d4aa;">{tp_fmt}</b><br>
+            SL: <b style="color:#ff4d6a;">{sl_fmt}</b><br>
             R/R: <b style="color:#e2e8f0;">1:{rr_p}</b>&nbsp;|&nbsp;Lot: <b style="color:#e2e8f0;">{lot_p}</b><br>
             <span style="color:{pipe_color};font-weight:600;">{pipe}</span>
         </div>
@@ -974,9 +978,9 @@ with tab2:
             <div style="font-size:.65rem;color:#64748b;line-height:2.2;">
                 Confiance:&nbsp;<b style="color:#e2e8f0;">{conf}%</b><br>
                 Corrélation:&nbsp;<b style="color:#e2e8f0;">{corr_p:+.4f}</b><br>
-                Entrée:&nbsp;<b style="color:#f7b529;">{entry_p:,.2f if entry_p > 0 else "—"}</b><br>
-                TP:&nbsp;<b style="color:#00d4aa;">{tp_p:,.2f if tp_p > 0 else "—"}</b><br>
-                SL:&nbsp;<b style="color:#ff4d6a;">{sl_p:,.2f if sl_p > 0 else "—"}</b><br>
+                Entrée:&nbsp;<b style="color:#f7b529;">{entry_fmt}</b><br>
+                TP:&nbsp;<b style="color:#00d4aa;">{tp_fmt}</b><br>
+                SL:&nbsp;<b style="color:#ff4d6a;">{sl_fmt}</b><br>
                 R/R:&nbsp;<b style="color:#e2e8f0;">1:{rr_p}</b><br>
                 Lot:&nbsp;<b style="color:#e2e8f0;">{lot_p}</b><br>
                 Pipeline:&nbsp;<b style="color:#e2e8f0;">{pipe}</b>
@@ -1001,9 +1005,9 @@ with tab2:
             <div class="lbl" style="margin-bottom:7px;">Support / Résistance</div>
             <div style="font-size:.66rem;line-height:2.2;">
                 <span style="color:#64748b;">Support:</span>
-                <b style="color:#00d4aa;float:right;">{sup:,.2f if sup > 0 else "—"}</b><br>
+                <b style="color:#00d4aa;float:right;">{(f'{sup:,.2f}') if sup > 0 else '—'}</b><br>
                 <span style="color:#64748b;">Résistance:</span>
-                <b style="color:#ff4d6a;float:right;">{res_z:,.2f if res_z > 0 else "—"}</b><br>
+                <b style="color:#ff4d6a;float:right;">{(f'{res_z:,.2f}') if res_z > 0 else '—'}</b><br>
                 <span style="color:#64748b;">ATR:</span>
                 <b style="color:#f7b529;float:right;">{atr:.3f}</b>
             </div>
