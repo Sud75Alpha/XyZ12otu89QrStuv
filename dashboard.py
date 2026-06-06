@@ -396,7 +396,7 @@ const VOL=GC.addHistogramSeries({{color:'rgba(0,212,170,0.3)',priceFormat:{{type
 const TPL=GC.addLineSeries({{color:'rgba(0,212,170,0.55)',lineWidth:1,lineStyle:2,priceLineVisible:false}});
 const SLL=GC.addLineSeries({{color:'rgba(255,77,106,0.55)',lineWidth:1,lineStyle:2,priceLineVisible:false}});
 const CC=LightweightCharts.createChart(corrEl,{{layout:{{background:{{color:'#0f1623'}},textColor:'#4a5568'}},grid:{{vertLines:{{color:'rgba(255,255,255,0.02)'}},horzLines:{{color:'rgba(255,255,255,0.02)'}}}},rightPriceScale:{{borderColor:'rgba(255,255,255,0.06)'}},timeScale:{{borderColor:'rgba(255,255,255,0.06)',visible:false}},crosshair:{{mode:LightweightCharts.CrosshairMode.Normal}}}});
-const CORRS=CC.addLineSeries({{color:'#f5a623',lineWidth:1.5,priceLineVisible:false,autoscaleInfoProvider:()=>({priceRange:{{minValue:-1,maxValue:1}}})}});
+const CORRS=CC.addLineSeries({{color:'#f5a623',lineWidth:1.5,priceLineVisible:false,autoscaleInfoProvider:()=>{{return {{priceRange:{{minValue:-1,maxValue:1}}}}}}}});
 
 const ro=new ResizeObserver(()=>{{GC.resize(goldEl.offsetWidth,goldEl.offsetHeight);CC.resize(corrEl.offsetWidth,corrEl.offsetHeight);}});
 ro.observe(goldEl); ro.observe(corrEl);
