@@ -400,6 +400,13 @@ table.ht tr:hover td{background:rgba(255,255,255,.02);}
         </div>
         <div id="chart-body">
           <div id="cw">
+            <div id="market-banner" style="display:none;align-items:center;justify-content:space-between;background:rgba(255,77,106,0.08);border:1px solid rgba(255,77,106,0.25);border-radius:9px;padding:8px 14px;margin-bottom:5px;flex-shrink:0;">
+              <div>
+                <div id="market-banner-txt" style="font-size:.72rem;font-weight:700;color:var(--red)">🔴 Marché FERMÉ</div>
+                <div id="market-banner-sub" style="font-size:.54rem;color:var(--muted);margin-top:2px">Réouverture dim. 22:00 UTC</div>
+              </div>
+              <div style="text-align:right;font-size:.52rem;color:var(--muted)">Bougies en <b style="color:var(--gold)">simulation</b></div>
+            </div>
             <div id="gc"></div>
             <div id="cc"></div>
           </div>
@@ -619,6 +626,7 @@ table.ht tr:hover td{background:rgba(255,255,255,.02);}
   <div class="ti"><span class="ts2">ATR</span><span class="tv2" id="tk-atr" style="color:var(--purple)">—</span></div>
   <div class="ti"><span class="ts2">SIGNAL</span><span class="tv2" id="tk-sig" style="color:var(--muted)">—</span><span class="tc2" id="tk-cf2">—</span></div>
   <div class="ti"><span class="ts2">PIPE</span><span class="tv2" id="tk-pp" style="color:var(--gold)">IDLE</span></div>
+  <div class="ti"><span class="ts2">MARCHÉ</span><span class="tv2" id="tk-mkt" style="color:var(--green)">● OUVERT</span></div>
   <div class="ti" style="margin-left:auto"><span class="ts2">API</span><span class="tv2" id="tk-api" style="color:var(--muted)">—</span></div>
   <div class="ti"><span class="ts2">TICK#</span><span class="tv2" id="tk-n">0</span></div>
 </div>
@@ -648,6 +656,40 @@ const ATR_MODES = {
   aggressive:   {slMult:2.0, tpMult:5.0, label:'Agressif'},
   swing:        {slMult:3.0, tpMult:6.0, label:'Swing'},
 };
+
+/* ══════════ MARKET HOURS ══════════ */
+function isMarketClosed() {
+  // Forex/Gold fermé : vendredi 22:00 UTC → dimanche 22:00 UTC
+  const now = new Date();
+  const day = now.getUTCDay();   // 0=dim, 1=lun, 5=ven, 6=sam
+  const hour = now.getUTCHours();
+  const min  = now.getUTCMinutes();
+  const timeNum = hour * 100 + min;
+  if (day === 6) return true;                          // Samedi entier
+  if (day === 0 && timeNum < 2200) return true;        // Dimanche avant 22h UTC
+  if (day === 5 && timeNum >= 2200) return true;       // Vendredi après 22h UTC
+  return false;
+}
+
+function getMarketStatus() {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const hour = now.getUTCHours();
+  const days = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+  if (!isMarketClosed()) return {closed:false};
+  // Calculer réouverture : prochain dim 22:00 UTC
+  const reopen = new Date(now);
+  // Avancer jusqu'au prochain dimanche 22:00 UTC
+  let daysUntil = (7 - day + 0) % 7; // jours jusqu'au dim
+  if (day === 0 && hour >= 22) daysUntil = 7; // si dim après 22h, attendre le suivant
+  if (daysUntil === 0 && day !== 0) daysUntil = 7;
+  reopen.setUTCDate(reopen.getUTCDate() + daysUntil);
+  reopen.setUTCHours(22,0,0,0);
+  const diffMs = reopen - now;
+  const diffH  = Math.floor(diffMs/3600000);
+  const diffM  = Math.floor((diffMs%3600000)/60000);
+  return {closed:true, reopenIn: diffH+'h '+diffM+'m', reopenTime:'Dim 22:00 UTC'};
+}
 
 /* ══════════ CHARTS INIT ══════════ */
 const gcEl = document.getElementById('gc');
@@ -767,14 +809,24 @@ function buildChart() {
   const tf = S.tf;
   S.chartTF = tf;
   const raw = S.ohlcv[tf];
-  const base = S.price>100 ? S.price : 4328.0;
+  const base = S.price>100 ? S.price : 4328.92;
 
   let data;
   if (raw && raw.length>5) {
     data = parseAPICandles(raw, base);
   }
   if (!data || data.length<5) {
-    data = simCandles(250, TF_MINS[tf], base);
+    const mkt = getMarketStatus();
+    if (mkt.closed) {
+      // Marché fermé sans données API → sim réduite + overlay
+      data = simCandles(60, TF_MINS[tf], base);
+      showMarketClosedOverlay(mkt);
+    } else {
+      data = simCandles(250, TF_MINS[tf], base);
+      hideMarketClosedOverlay();
+    }
+  } else {
+    hideMarketClosedOverlay();
   }
 
   // Sort & deduplicate
@@ -957,16 +1009,20 @@ function applySnap(d) {
   if (typeof d.wins==='number')        S.wins   = +d.wins;
   if (typeof d.losses==='number')      S.losses = +d.losses;
   // MT5 detection - plusieurs clés possibles selon api_server.py
-  const mt5Raw = d.mt5_connected ?? d.mt5_status ?? d.connected ?? d.bot_status;
+  // ── MT5 : lecture stricte, pas d'inférence
+  const mt5Raw = d.mt5_connected ?? d.mt5_status ?? d.connected ?? null;
   if (mt5Raw != null) {
     if (typeof mt5Raw === 'boolean') S.mt5Ok = mt5Raw;
     else if (typeof mt5Raw === 'number') S.mt5Ok = mt5Raw === 1;
     else if (typeof mt5Raw === 'string') {
       S.mt5Ok = ['true','connected','running','1','ok','active'].includes(mt5Raw.toLowerCase());
     }
+  } else {
+    S.mt5Ok = false;
   }
-  // Si le bot envoie des données avec un prix valide, MT5 est probablement connecté
-  if (!S.mt5Ok && d.gold_price && +d.gold_price > 100) S.mt5Ok = true;
+  // bot_status: 'sleeping'/'weekend' → veille planifiée (≠ erreur)
+  S.botStatus = String(d.bot_status || '').toLowerCase();
+  S.isWeekend = isMarketClosed();
   if (Array.isArray(d.bot_logs))       S.logs   = d.bot_logs;
   if (Array.isArray(d.signals))        S.signals= d.signals;
   if (d.zones&&typeof d.zones==='object') S.zones=d.zones;
@@ -1086,9 +1142,20 @@ function updateUI() {
   // Connexion
   const da=document.getElementById('dot-api');if(da)da.className='dot '+(S.apiOk?'g':'y');
   setTxt('lbl-api',S.apiOk?'API Live':'Simulation');setCol('lbl-api',S.apiOk?C_UP:'var(--gold)');
-  const dm=document.getElementById('dot-mt5');if(dm)dm.className='dot '+(S.mt5Ok?'g':S.apiOk?'r':'y');
-  const mt5Lbl = S.mt5Ok ? 'MT5 Connecté ✓' : (S.apiOk ? 'MT5 Hors ligne' : 'MT5 En attente');
-  const mt5Col = S.mt5Ok ? C_UP : (S.apiOk ? C_DN : 'var(--gold)');
+  const dm=document.getElementById('dot-mt5');if(dm)dm.className='dot '+(S.mt5Ok?'g':isMarketClosed()?'y':S.apiOk?'r':'y');
+  const isWknd = isMarketClosed();
+  let mt5Lbl, mt5Col;
+  if (S.mt5Ok) {
+    mt5Lbl = 'MT5 Connecté ✓'; mt5Col = C_UP;
+  } else if (isWknd) {
+    mt5Lbl = '💤 Veille Weekend'; mt5Col = 'var(--gold)';
+  } else if (S.botStatus && ['sleeping','paused','idle'].includes(S.botStatus)) {
+    mt5Lbl = '⏸ Bot en veille'; mt5Col = 'var(--gold)';
+  } else if (S.apiOk) {
+    mt5Lbl = '⚠ MT5 Hors ligne'; mt5Col = C_DN;
+  } else {
+    mt5Lbl = 'MT5 En attente...'; mt5Col = 'var(--muted)';
+  }
   setTxt('lbl-mt5', mt5Lbl); setCol('lbl-mt5', mt5Col);
 
   // Historique
@@ -1146,6 +1213,89 @@ function renderLogs(){
   }).join('');
 }
 
+/* ══════════ MARKET HOURS ══════════ */
+function isMarketClosed() {
+  // Forex/Gold fermé : vendredi 22:00 UTC → dimanche 22:00 UTC
+  const now = new Date();
+  const day = now.getUTCDay();   // 0=dim, 1=lun, ..., 5=ven, 6=sam
+  const hour = now.getUTCHours();
+  if (day === 6) return true;                        // samedi entier
+  if (day === 0 && hour < 22) return true;           // dimanche avant 22h UTC
+  if (day === 5 && hour >= 22) return true;          // vendredi après 22h UTC
+  return false;
+}
+
+function getMarketStatus() {
+  if (isMarketClosed()) {
+    const now = new Date();
+    const day = now.getUTCDay();
+    // Calcul réouverture : dimanche 22:00 UTC
+    const reopen = new Date(now);
+    const daysUntilSun = (7 - day) % 7 || 7;
+    reopen.setUTCDate(now.getUTCDate() + (day===0 ? 0 : daysUntilSun));
+    reopen.setUTCHours(22, 0, 0, 0);
+    const diff = reopen - now;
+    const hh = Math.floor(diff/3600000);
+    const mm = Math.floor((diff%3600000)/60000);
+    return { closed: true, label: '🔴 Marché FERMÉ', sub: `Réouverture dans ${hh}h${mm}m (dim. 22:00 UTC)` };
+  }
+  return { closed: false, label: '🟢 Marché OUVERT', sub: 'Gold · Forex' };
+}
+
+function updateMarketBanner() {
+  const st = getMarketStatus();
+  const banner = document.getElementById('market-banner');
+  const bannerTxt = document.getElementById('market-banner-txt');
+  const bannerSub = document.getElementById('market-banner-sub');
+  if (!banner) return;
+  if (st.closed) {
+    banner.style.display = 'flex';
+    if (bannerTxt) bannerTxt.textContent = st.label;
+    if (bannerSub) bannerSub.textContent = st.sub;
+  } else {
+    banner.style.display = 'none';
+  }
+  // Ticker marché
+  const tkMkt = document.getElementById('tk-mkt');
+  if (tkMkt) { tkMkt.textContent = st.closed ? '⏸ FERMÉ' : '● OUVERT'; tkMkt.style.color = st.closed ? 'var(--red)' : 'var(--green)'; }
+}
+
+
+/* ══════════ MARKET CLOSED OVERLAY ══════════ */
+function showMarketClosedOverlay(mkt) {
+  let ov = document.getElementById('market-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'market-overlay';
+    ov.style.cssText = [
+      'position:absolute','inset:0','z-index:50',
+      'display:flex','flex-direction:column',
+      'align-items:center','justify-content:center',
+      'background:rgba(11,15,26,0.82)',
+      'backdrop-filter:blur(4px)',
+      'border-radius:9px','pointer-events:none'
+    ].join(';');
+    const cw = document.getElementById('cw');
+    if (cw) { cw.style.position='relative'; cw.appendChild(ov); }
+  }
+  ov.innerHTML = `
+    <div style="font-size:2rem;margin-bottom:8px">🔒</div>
+    <div style="font-family:'JetBrains Mono',monospace;font-size:1rem;
+      font-weight:700;color:#f5a623;margin-bottom:4px">MARCHÉ FERMÉ</div>
+    <div style="font-size:.62rem;color:#4a5568;margin-bottom:6px">
+      Weekend — Gold/Forex suspendu</div>
+    <div style="font-size:.58rem;color:#00d4aa;font-weight:600">
+      Réouverture dans ${mkt.reopenIn||'—'}</div>
+    <div style="font-size:.5rem;color:#4a5568;margin-top:3px">${mkt.reopenTime||''}</div>
+    <div style="font-size:.5rem;color:#2e3a4e;margin-top:8px">
+      Données affichées : historique OHLCV</div>`;
+  ov.style.display='flex';
+}
+function hideMarketClosedOverlay() {
+  const ov = document.getElementById('market-overlay');
+  if (ov) ov.style.display='none';
+}
+
 /* ══════════ MAIN LOOP ══════════ */
 async function mainLoop() {
   S.tick++;
@@ -1156,12 +1306,18 @@ async function mainLoop() {
   } else {
     S.apiOk=false;
     S.prev  = S.price||3284;
-    if (!S.price) S.price=4328;
-    S.price  = +(S.price+(Math.random()-0.48)*0.65).toFixed(2);
-    S.dxy    = +(S.dxy -(Math.random()-0.48)*0.01).toFixed(3);
-    S.corr   = +Math.max(-1,Math.min(1,S.corr+(Math.random()-0.5)*0.007)).toFixed(4);
-    S.chg    = +(S.price-S.prev).toFixed(2);
-    S.pct    = +(S.chg/(S.prev||S.price)*100).toFixed(3);
+    if (!S.price) S.price=4328.92;
+    if (!isMarketClosed()) {
+      // Simulation uniquement si marché ouvert
+      S.price  = +(S.price+(Math.random()-0.48)*0.65).toFixed(2);
+      S.dxy    = +(S.dxy -(Math.random()-0.48)*0.01).toFixed(3);
+      S.corr   = +Math.max(-1,Math.min(1,S.corr+(Math.random()-0.5)*0.007)).toFixed(4);
+      S.chg    = +(S.price-S.prev).toFixed(2);
+      S.pct    = +(S.chg/(S.prev||S.price)*100).toFixed(3);
+    } else {
+      // Weekend : prix figé, changement = 0
+      S.chg = 0; S.pct = 0;
+    }
     S.dxyChg = +(S.dxy-104.23).toFixed(4);
     S.bid    = S.price-0.15; S.ask=S.price+0.15;
     if (!S.entry) S.entry=S.price;
@@ -1193,6 +1349,7 @@ async function mainLoop() {
     computeATRLevels();
   }
 
+  updateMarketBanner();
   updateUI();
   setTimeout(mainLoop, S.apiOk?3000:2000);
 }
