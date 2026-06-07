@@ -134,6 +134,7 @@ html,body{width:100%;height:100%;overflow:hidden;background:var(--bg);
 .dot{width:5px;height:5px;border-radius:50%;flex-shrink:0;}
 .dot.g{background:var(--green);box-shadow:0 0 4px var(--green);}
 .dot.y{background:var(--gold);}
+.dot.r{background:var(--red);box-shadow:0 0 4px var(--red);}
 
 /* ─── CONTENT AREA ─── */
 #content{flex:1;display:flex;overflow:hidden;position:relative;}
@@ -766,7 +767,7 @@ function buildChart() {
   const tf = S.tf;
   S.chartTF = tf;
   const raw = S.ohlcv[tf];
-  const base = S.price>100 ? S.price : 3284.0;
+  const base = S.price>100 ? S.price : 4328.0;
 
   let data;
   if (raw && raw.length>5) {
@@ -834,7 +835,7 @@ function parseAPICandles(raw, realPrice) {
     const o  = +c.open, h = +c.high, l = +c.low, cl = +c.close;
     if (isNaN(o)||isNaN(h)||isNaN(l)||isNaN(cl)) return;
     if (o<500||h<500||l<500||cl<500) return;   // pas XAUUSD
-    if (o>8000||h>8000) return;
+    if (o>12000||h>12000) return;
     if (h<l || h<Math.min(o,cl) || l>Math.max(o,cl)) return;
     data.push({time:t,open:+o.toFixed(2),high:+h.toFixed(2),
                low:+l.toFixed(2),close:+cl.toFixed(2),
@@ -854,7 +855,7 @@ function simCandles(n, mins, base) {
   let p = base * (1-(Math.random()*0.015+0.005));
   for (let i=0;i<n;i++) {
     const t   = now-(n-1-i)*mins*60;
-    const chg = (Math.random()-0.485)*p*0.0018;
+    const chg = (Math.random()-0.485)*p*0.0015;  // ~$6 par bougie M15 pour XAUUSD
     const o=p, cl=+(p+chg).toFixed(2);
     const sp = Math.abs(chg)*0.6 + p*0.00025;
     const h  = +(Math.max(o,cl)+sp*(0.3+Math.random()*0.7)).toFixed(2);
@@ -955,7 +956,17 @@ function applySnap(d) {
   if (typeof d.winrate==='number')     S.wr     = +d.winrate;
   if (typeof d.wins==='number')        S.wins   = +d.wins;
   if (typeof d.losses==='number')      S.losses = +d.losses;
-  if (d.mt5_connected!=null)           S.mt5Ok  = !!d.mt5_connected;
+  // MT5 detection - plusieurs clés possibles selon api_server.py
+  const mt5Raw = d.mt5_connected ?? d.mt5_status ?? d.connected ?? d.bot_status;
+  if (mt5Raw != null) {
+    if (typeof mt5Raw === 'boolean') S.mt5Ok = mt5Raw;
+    else if (typeof mt5Raw === 'number') S.mt5Ok = mt5Raw === 1;
+    else if (typeof mt5Raw === 'string') {
+      S.mt5Ok = ['true','connected','running','1','ok','active'].includes(mt5Raw.toLowerCase());
+    }
+  }
+  // Si le bot envoie des données avec un prix valide, MT5 est probablement connecté
+  if (!S.mt5Ok && d.gold_price && +d.gold_price > 100) S.mt5Ok = true;
   if (Array.isArray(d.bot_logs))       S.logs   = d.bot_logs;
   if (Array.isArray(d.signals))        S.signals= d.signals;
   if (d.zones&&typeof d.zones==='object') S.zones=d.zones;
@@ -968,8 +979,12 @@ function applySnap(d) {
   if (sig.rr)  S.rr  =+sig.rr;
   if (sig.lot) S.lot =+sig.lot;
   if (sig.pipeline_state) S.pipe=sig.pipeline_state;
+  // Fallback prix depuis signal si gold_price manquant
+  if ((!S.price||S.price<100) && sig.gold_price && +sig.gold_price>100) S.price=+sig.gold_price;
   const mtf=d.mtf_analysis||d.mtf||{};
   ['H1','M15','M5'].forEach(t=>{if(mtf[t])S.mtf[t]=mtf[t];});
+  // Debug log
+  console.log('[API] gold='+S.price+' mt5='+S.mt5Ok+' corr='+S.corr+' ohlcv_m15='+(S.ohlcv.M15?.length||0));
   const ohlcv=d.ohlcv||{};
   ['M5','M15','H1'].forEach(tf=>{
     if(ohlcv[tf]&&Array.isArray(ohlcv[tf])&&ohlcv[tf].length>5) S.ohlcv[tf]=ohlcv[tf];
@@ -1071,8 +1086,10 @@ function updateUI() {
   // Connexion
   const da=document.getElementById('dot-api');if(da)da.className='dot '+(S.apiOk?'g':'y');
   setTxt('lbl-api',S.apiOk?'API Live':'Simulation');setCol('lbl-api',S.apiOk?C_UP:'var(--gold)');
-  const dm=document.getElementById('dot-mt5');if(dm)dm.className='dot '+(S.mt5Ok?'g':'y');
-  setTxt('lbl-mt5',S.mt5Ok?'MT5 Connecté':'MT5 Déconnecté');setCol('lbl-mt5',S.mt5Ok?C_UP:'var(--gold)');
+  const dm=document.getElementById('dot-mt5');if(dm)dm.className='dot '+(S.mt5Ok?'g':S.apiOk?'r':'y');
+  const mt5Lbl = S.mt5Ok ? 'MT5 Connecté ✓' : (S.apiOk ? 'MT5 Hors ligne' : 'MT5 En attente');
+  const mt5Col = S.mt5Ok ? C_UP : (S.apiOk ? C_DN : 'var(--gold)');
+  setTxt('lbl-mt5', mt5Lbl); setCol('lbl-mt5', mt5Col);
 
   // Historique
   setTxt('ht-tot',S.signals.length);setTxt('ht-wr',wr+'%');setTxt('ht-w',S.wins);setTxt('ht-l',S.losses);
@@ -1139,7 +1156,7 @@ async function mainLoop() {
   } else {
     S.apiOk=false;
     S.prev  = S.price||3284;
-    if (!S.price) S.price=3284;
+    if (!S.price) S.price=4328;
     S.price  = +(S.price+(Math.random()-0.48)*0.65).toFixed(2);
     S.dxy    = +(S.dxy -(Math.random()-0.48)*0.01).toFixed(3);
     S.corr   = +Math.max(-1,Math.min(1,S.corr+(Math.random()-0.5)*0.007)).toFixed(4);
