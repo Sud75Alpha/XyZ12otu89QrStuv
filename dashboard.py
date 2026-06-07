@@ -4,20 +4,56 @@ import requests, json
 from datetime import datetime
 
 st.set_page_config(
-    page_title="GOLD/DXY PRO v15",
+    page_title="GOLD/DXY PRO ",
     page_icon="⚡",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
 
+# Inject CSS to remove ALL streamlit padding/margins
 st.markdown("""
 <style>
-[data-testid="stSidebar"]{display:none!important;}
-[data-testid="collapsedControl"]{display:none!important;}
-.main .block-container{padding:0!important;max-width:100%!important;margin:0!important;}
-#MainMenu,footer,header,[data-testid="stToolbar"],[data-testid="stDecoration"],[data-testid="stHeader"]{display:none!important;}
-body{overflow:hidden!important;}
-iframe{border:none!important;display:block!important;}
+/* Reset complet */
+html, body { margin: 0 !important; padding: 0 !important; overflow: hidden !important; }
+/* Cacher tous les éléments natifs Streamlit */
+#MainMenu, footer, header,
+[data-testid="stToolbar"],
+[data-testid="stDecoration"],
+[data-testid="stHeader"],
+[data-testid="stSidebar"],
+[data-testid="collapsedControl"],
+[data-testid="stStatusWidget"],
+.stDeployButton { display: none !important; }
+/* Supprimer TOUT le padding du container principal */
+[data-testid="stAppViewContainer"] > section.main > div.block-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    max-width: 100% !important;
+    min-height: 0 !important;
+}
+[data-testid="stAppViewContainer"] > section.main {
+    padding: 0 !important;
+    overflow: hidden !important;
+}
+.main .block-container {
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    margin: 0 !important;
+    max-width: 100vw !important;
+}
+/* iframe plein écran */
+iframe {
+    border: none !important;
+    display: block !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 9999 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1057,4 +1093,4 @@ mainLoop();
 """.replace('__API_URL__', API_URL).replace('__API_KEY__', API_KEY).replace('__SNAP_JSON__', snap_json)
 
 # Hauteur = 100vh dans iframe, on utilise la hauteur max
-components.html(HTML, height=980, scrolling=False)
+components.html(HTML, height=10000, scrolling=False)
