@@ -1,7 +1,8 @@
 import streamlit as st
+import json
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="GOLD/DXY PRO ", page_icon="⚡",
+st.set_page_config(page_title="GOLD/DXY PRO", page_icon="⚡",
                    layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""<style>
@@ -19,6 +20,44 @@ iframe{border:none!important;display:block!important;position:fixed!important;
 
 API_URL = "https://en-ligne-5wi6.onrender.com"
 API_KEY = "gold_dxy_secret_2024"
+
+import random, math
+from datetime import datetime, timezone, timedelta
+
+def gen_gold_candles(n=500, tf_mins=15, base=4328.92, seed=42):
+    random.seed(seed)
+    candles, price = [], base * 0.97
+    now = datetime.now(timezone.utc)
+    start = now - timedelta(minutes=n*tf_mins)
+    for i in range(n):
+        t = start + timedelta(minutes=i*tf_mins)
+        h = t.hour
+        vol = 0.0011 if 13<=h<=20 else 0.0009 if 8<=h<=16 else 0.0004
+        drift = (base - price) / (base * 0.15)
+        chg = (random.gauss(drift*0.001, vol)) * price
+        o, cl = round(price,2), round(price+chg,2)
+        sp = abs(chg)*(0.4+random.random()*0.8)+price*0.0002
+        hi = round(max(o,cl)+sp*random.random(),2)
+        lo = max(round(min(o,cl)-sp*random.random(),2),1.0)
+        candles.append({"time":int(t.timestamp()),"open":o,"high":hi,"low":lo,"close":cl,"volume":max(100,int(random.expovariate(1/5000)))})
+        price = cl
+    if candles:
+        off = base - candles[-1]['close']
+        ns = min(20, len(candles))
+        for j in range(ns):
+            ix = len(candles)-ns+j; f2 = j/ns
+            for k in ('open','high','low','close'):
+                candles[ix][k] = round(candles[ix][k]+off*f2, 2)
+        candles[-1]['close'] = base
+        candles[-1]['high']  = max(candles[-1]['high'], base)
+    return candles
+
+INIT_OHLCV = {
+    'M5':  gen_gold_candles(500,  5,  4328.92),
+    'M15': gen_gold_candles(500,  15, 4328.92),
+    'H1':  gen_gold_candles(500,  60, 4328.92),
+}
+INIT_OHLCV_JSON = json.dumps(INIT_OHLCV)
 
 HTML = """<!DOCTYPE html>
 <html lang="fr">
@@ -638,13 +677,13 @@ const API_KEY = 'APIKEY_PLACEHOLDER';
 
 /* ══════════ STATE ══════════ */
 const S = {
-  price:0, prev:0, dxy:104.23, corr:-0.65,
-  chg:0, pct:0, dxyChg:0, bid:0, ask:0,
+  price:4328.92, prev:4328.92, dxy:104.23, corr:-0.65,
+  chg:0, pct:0, dxyChg:0, bid:4328.77, ask:4329.07,
   sig:'WAIT', conf:0, entry:0, tp:0, sl:0, rr:0, lot:0,
   pipe:'IDLE', wins:0, losses:0, wr:0,
   atr:0, atrMode:'balanced',
   apiOk:false, mt5Ok:false, tick:0, tf:'M15', logFilter:'ALL',
-  ohlcv:{M5:[],M15:[],H1:[]}, mtf:{H1:{},M15:{},M5:{}},
+  ohlcv:"OHLCV_PLACEHOLDER", mtf:{H1:{},M15:{},M5:{}},
   zones:{}, logs:[], signals:[],
   hArr:[], lArr:[], chartTF:'', chartLoaded:false,
 };
@@ -819,10 +858,10 @@ function buildChart() {
     const mkt = getMarketStatus();
     if (mkt.closed) {
       // Marché fermé sans données API → sim réduite + overlay
-      data = simCandles(60, TF_MINS[tf], base);
+      data = simCandles(500, TF_MINS[tf], base);
       showMarketClosedOverlay(mkt);
     } else {
-      data = simCandles(250, TF_MINS[tf], base);
+      data = simCandles(500, TF_MINS[tf], base);
       hideMarketClosedOverlay();
     }
   } else {
@@ -1043,7 +1082,11 @@ function applySnap(d) {
   console.log('[API] gold='+S.price+' mt5='+S.mt5Ok+' corr='+S.corr+' ohlcv_m15='+(S.ohlcv.M15?.length||0));
   const ohlcv=d.ohlcv||{};
   ['M5','M15','H1'].forEach(tf=>{
-    if(ohlcv[tf]&&Array.isArray(ohlcv[tf])&&ohlcv[tf].length>5) S.ohlcv[tf]=ohlcv[tf];
+    if(ohlcv[tf]&&Array.isArray(ohlcv[tf])&&ohlcv[tf].length>5) {
+      S.ohlcv[tf]=ohlcv[tf];
+      // Forcer rebuild du chart si le TF courant a de nouvelles données réelles
+      if(tf===S.tf) S.chartTF='';
+    }
   });
 }
 
@@ -1396,10 +1439,20 @@ function filterLog(f,el){
   renderLogs();
 }
 
+// ── DÉMARRAGE IMMÉDIAT ──
+// Afficher le chart dès le chargement sans attendre l'API
+(function initImmediate() {
+  S.price = 4328.92; S.bid = 4328.77; S.ask = 4329.07;
+  S.chg = 0; S.pct = 0;
+  // Construire le chart avec les données pré-chargées
+  buildChart();
+  updateUI();
+})();
+
 mainLoop();
 </script>
 </body>
 </html>
-""".replace('APIURL_PLACEHOLDER', API_URL).replace('APIKEY_PLACEHOLDER', API_KEY)
+""".replace('APIURL_PLACEHOLDER', API_URL).replace('APIKEY_PLACEHOLDER', API_KEY).replace('"OHLCV_PLACEHOLDER"', INIT_OHLCV_JSON)
 
 components.html(HTML, height=10000, scrolling=False)
