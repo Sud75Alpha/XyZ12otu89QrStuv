@@ -666,7 +666,12 @@ table.ht tr:hover td{background:rgba(255,255,255,.02);}
   <div class="ti"><span class="ts2">SIGNAL</span><span class="tv2" id="tk-sig" style="color:var(--muted)">—</span><span class="tc2" id="tk-cf2">—</span></div>
   <div class="ti"><span class="ts2">PIPE</span><span class="tv2" id="tk-pp" style="color:var(--gold)">IDLE</span></div>
   <div class="ti"><span class="ts2">MARCHÉ</span><span class="tv2" id="tk-mkt" style="color:var(--green)">● OUVERT</span></div>
-  <div class="ti" style="margin-left:auto"><span class="ts2">API</span><span class="tv2" id="tk-api" style="color:var(--muted)">—</span></div>
+  <div class="ti" style="margin-left:auto">
+  <span class="ts2">SOURCE</span><span class="tv2" id="tk-api" style="color:var(--muted)">—</span>
+</div>
+<div class="ti">
+  <span class="ts2">MARCHÉ</span><span class="tv2" id="tk-mkt" style="color:var(--muted)">—</span>
+</div>
   <div class="ti"><span class="ts2">TICK#</span><span class="tv2" id="tk-n">0</span></div>
 </div>
 
@@ -681,7 +686,7 @@ const S = {
   chg:0, pct:0, dxyChg:0, bid:4328.77, ask:4329.07,
   sig:'WAIT', conf:0, entry:0, tp:0, sl:0, rr:0, lot:0,
   pipe:'IDLE', wins:0, losses:0, wr:0,
-  atr:0, atrMode:'balanced',
+  atr:0, atrMode:'balanced', openPrice:0,
   apiOk:false, mt5Ok:false, tick:0, tf:'M15', logFilter:'ALL',
   ohlcv:"OHLCV_PLACEHOLDER", mtf:{H1:{},M15:{},M5:{}},
   zones:{}, logs:[], signals:[],
@@ -1023,6 +1028,145 @@ function computeATRLevels() {
 }
 
 /* ══════════ API FETCH ══════════ */
+/* ══════════ WEBSOCKET BINANCE TEMPS RÉEL ══════════
+ * wss://stream.binance.com → XAUUSDT tick + klines M15 réelles
+ * Render API → synchro MT5 signal/corrélation toutes les 3s
+ ═══════════════════════════════════════════════════════ */
+let wsPrice = null, wsKline = null;
+let lastBinancePrice = 0, binanceOk = false;
+// Offset Binance→MT5 (calibré sur 1ère réponse API)
+let priceOffset = 0;
+
+function startBinanceWS() {
+  // ── Flux 1 : prix tick par tick ──
+  try {
+    wsPrice = new WebSocket('wss://stream.binance.com:9443/ws/xauusdt@trade');
+    wsPrice.onopen = () => {
+      binanceOk = true;
+      console.log('[WS] Binance trade stream connecté');
+      updateConnStatus(true);
+    };
+    wsPrice.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        const rawPrice = parseFloat(d.p);
+        if (!rawPrice || rawPrice < 100) return;
+        // Appliquer offset de calibration MT5
+        const price = +(rawPrice + priceOffset).toFixed(2);
+        S.prev  = S.price;
+        S.price = price;
+        S.bid   = +(price - 0.15).toFixed(2);
+        S.ask   = +(price + 0.15).toFixed(2);
+        S.chg   = +(price - (S.openPrice||price)).toFixed(2);
+        S.pct   = +(S.chg / (S.openPrice||price) * 100).toFixed(3);
+        // Mise à jour tick immédiate
+        tickUpdate();
+      } catch(e){}
+    };
+    wsPrice.onerror = () => { binanceOk=false; updateConnStatus(false); };
+    wsPrice.onclose = () => {
+      binanceOk=false;
+      console.log('[WS] Binance déconnecté - reconnexion dans 5s');
+      setTimeout(startBinanceWS, 5000);
+    };
+  } catch(e) { console.warn('[WS] Binance non disponible:', e.message); }
+
+  // ── Flux 2 : klines M15 réelles ──
+  try {
+    const tfMap = {M5:'5m', M15:'15m', H1:'1h'};
+    const interval = tfMap[S.tf] || '15m';
+    wsKline = new WebSocket('wss://stream.binance.com:9443/ws/xauusdt@kline_'+interval);
+    wsKline.onmessage = (ev) => {
+      try {
+        const d = JSON.parse(ev.data);
+        const k = d.k;
+        if (!k) return;
+        const t  = Math.floor(k.t/1000);
+        const o  = +(parseFloat(k.o)+priceOffset).toFixed(2);
+        const h  = +(parseFloat(k.h)+priceOffset).toFixed(2);
+        const l  = +(parseFloat(k.l)+priceOffset).toFixed(2);
+        const cl = +(parseFloat(k.c)+priceOffset).toFixed(2);
+        const v  = parseFloat(k.v);
+        if (cl < 100 || cl > 12000) return;
+        try {
+          CSER.update({time:t, open:o, high:h, low:l, close:cl});
+          VOLS.update({time:t, value:v, color:cl>=o?'rgba(0,212,170,0.4)':'rgba(255,77,106,0.4)'});
+          if (S.hArr.length) {
+            S.hArr[S.hArr.length-1] = Math.max(S.hArr[S.hArr.length-1], h);
+            S.lArr[S.lArr.length-1] = Math.min(S.lArr[S.lArr.length-1], l);
+          }
+          if (k.x) {
+            // Bougie fermée → nouvelle bougie
+            S.hArr.push(h); S.lArr.push(l);
+          }
+        } catch(e){}
+        setTxt('oh-o', fmt(o)); setTxt('oh-h', fmt(h));
+        setTxt('oh-l', fmt(l)); setTxt('oh-c', fmt(cl));
+        setTxt('oh-v', (v/1000).toFixed(1)+'K');
+        setTxt('rp-hi', fmt(Math.max(...S.hArr)));
+        setTxt('rp-lo', fmt(Math.min(...S.lArr)));
+      } catch(e){}
+    };
+    wsKline.onerror = () => {};
+    wsKline.onclose = () => { setTimeout(startBinanceWS, 5000); };
+  } catch(e){}
+}
+
+function updateConnStatus(wsOk) {
+  const da = document.getElementById('dot-api');
+  const la = document.getElementById('lbl-api');
+  if (da) da.className = 'dot ' + (wsOk||S.apiOk?'g':'y');
+  if (la) { la.textContent = wsOk ? 'Binance WS Live ✓' : (S.apiOk?'API Live':'Simulation'); la.style.color=wsOk||S.apiOk?'var(--green)':'var(--gold)'; }
+  // Ticker marché
+  const tkm = document.getElementById('tk-mkt');
+  if (tkm) { tkm.textContent = isMarketClosed()?'FERMÉ':wsOk?'LIVE WS':'API'; tkm.style.color=isMarketClosed()?'var(--red)':wsOk?'var(--green)':'var(--gold)'; }
+}
+
+function tickUpdate() {
+  // Mise à jour légère sans rebuild chart
+  const p=S.price, up=S.chg>=0;
+  const CU='var(--green)', CD='var(--red)';
+  setTxt('tp-p', fmt(p));
+  const tc=document.getElementById('tp-c');
+  if(tc){tc.textContent=(up?'▲ +':'▼ ')+Math.abs(S.chg).toFixed(2)+' ('+(up?'+':'')+S.pct.toFixed(2)+'%)';tc.style.color=up?CU:CD;}
+  setTxt('sb-g', fmt(p));
+  const sc=document.getElementById('sb-gc');
+  if(sc){sc.textContent=(up?'▲ +':'▼ ')+Math.abs(S.chg).toFixed(2)+' ('+(up?'+':'')+S.pct.toFixed(2)+'%)';sc.className='chg '+(up?'up':'dn');}
+  setTxt('sb-bid',fmt(S.bid)); setTxt('sb-ask',fmt(S.ask));
+  setTxt('tk-g', p.toFixed(2));
+  const tgc=document.getElementById('tk-gc');if(tgc){tgc.textContent=(up?'▲ +':'▼ ')+Math.abs(S.chg).toFixed(2);tgc.className='tc2 '+(up?'up':'dn');}
+  setTxt('oh-c', fmt(p));
+  // Update last candle via CS si pas de wsKline actif
+  if (!wsKline || wsKline.readyState!==1) {
+    const now=Math.floor(Date.now()/1000);
+    try{ CSER.update({time:now,open:+(S.prev||p).toFixed(2),high:+Math.max(p,S.prev||p).toFixed(2),low:+Math.min(p,S.prev||p).toFixed(2),close:+p.toFixed(2)}); }catch(e){}
+  }
+}
+
+/* ── Charger l'historique Binance REST au démarrage ── */
+async function fetchBinanceHistory(tf) {
+  const tfMap = {M5:'5m', M15:'15m', H1:'1h'};
+  const interval = tfMap[tf]||'15m';
+  try {
+    const url = `https://api.binance.com/api/v3/klines?symbol=XAUUSDT&interval=${interval}&limit=500`;
+    const r = await fetch(url, {signal:AbortSignal.timeout(8000)});
+    if (!r.ok) return null;
+    const raw = await r.json();
+    // Format: [openTime, open, high, low, close, volume, ...]
+    return raw.map(k => ({
+      time:  Math.floor(k[0]/1000),
+      open:  +(parseFloat(k[1])+priceOffset).toFixed(2),
+      high:  +(parseFloat(k[2])+priceOffset).toFixed(2),
+      low:   +(parseFloat(k[3])+priceOffset).toFixed(2),
+      close: +(parseFloat(k[4])+priceOffset).toFixed(2),
+      volume: parseFloat(k[5]),
+    })).filter(d=>d.close>100&&d.close<12000);
+  } catch(e) {
+    console.warn('[Binance REST] Erreur:', e.message);
+    return null;
+  }
+}
+
 async function fetchSnap() {
   try {
     const r = await fetch(API_URL+'/api/snapshot',{
@@ -1342,59 +1486,93 @@ function hideMarketClosedOverlay() {
 /* ══════════ MAIN LOOP ══════════ */
 async function mainLoop() {
   S.tick++;
+
+  // ── 1. Render API → signal, corrélation, MT5, OHLCV ──
   const snap = await fetchSnap();
   if (snap) {
-    S.apiOk=true;
+    S.apiOk = true;
+    const prevP = S.price;
     applySnap(snap);
-  } else {
-    S.apiOk=false;
-    S.prev  = S.price||3284;
-    if (!S.price) S.price=4328.92;
-    if (!isMarketClosed()) {
-      // Simulation uniquement si marché ouvert
-      S.price  = +(S.price+(Math.random()-0.48)*0.65).toFixed(2);
-      S.dxy    = +(S.dxy -(Math.random()-0.48)*0.01).toFixed(3);
-      S.corr   = +Math.max(-1,Math.min(1,S.corr+(Math.random()-0.5)*0.007)).toFixed(4);
-      S.chg    = +(S.price-S.prev).toFixed(2);
-      S.pct    = +(S.chg/(S.prev||S.price)*100).toFixed(3);
-    } else {
-      // Weekend : prix figé, changement = 0
-      S.chg = 0; S.pct = 0;
+    // Calibrer offset Binance↔MT5 à la 1ère réponse
+    if (lastBinancePrice > 100 && S.price > 100 && priceOffset === 0) {
+      priceOffset = +(S.price - lastBinancePrice).toFixed(2);
+      console.log('[Cal] Offset Binance→MT5:', priceOffset);
     }
+    // Ne pas écraser le prix si Binance WS actif (plus frais)
+    if (!binanceOk) {
+      S.prev = prevP || S.price;
+      S.chg  = +(S.price - S.prev).toFixed(2);
+      S.pct  = +(S.chg / (S.prev||S.price) * 100).toFixed(3);
+    }
+    if (!S.openPrice && S.price>0) S.openPrice = S.price;
+  } else {
+    S.apiOk = false;
+    if (!binanceOk && !isMarketClosed()) {
+      S.prev   = S.price || 4328.92;
+      if (!S.price) S.price = 4328.92;
+      S.price  = +(S.price + (Math.random()-0.48)*0.5).toFixed(2);
+      S.dxy    = +(S.dxy   - (Math.random()-0.48)*0.01).toFixed(3);
+      S.corr   = +Math.max(-1,Math.min(1,S.corr+(Math.random()-0.5)*0.005)).toFixed(4);
+      S.chg    = +(S.price - S.prev).toFixed(2);
+      S.pct    = +(S.chg / (S.prev||S.price) * 100).toFixed(3);
+    } else if (isMarketClosed()) { S.chg=0; S.pct=0; }
     S.dxyChg = +(S.dxy-104.23).toFixed(4);
-    S.bid    = S.price-0.15; S.ask=S.price+0.15;
-    if (!S.entry) S.entry=S.price;
+    S.bid = +(S.price-0.15).toFixed(2); S.ask = +(S.price+0.15).toFixed(2);
+    if (!S.entry) S.entry = S.price;
   }
 
-  // Build or refresh chart
-  if (!S.chartLoaded || S.chartTF!==S.tf) {
-    buildChart();
-  } else {
-    // Live tick update
-    const now=Math.floor(Date.now()/1000);
-    const p=S.price, pv=S.prev||p;
-    if (p>100) {
-      try {
-        CSER.update({time:now,open:+pv.toFixed(2),
-          high:+Math.max(p,pv).toFixed(2),
-          low:+Math.min(p,pv).toFixed(2),
-          close:+p.toFixed(2)});
-        if(S.hArr.length){
-          S.hArr[S.hArr.length-1]=Math.max(S.hArr[S.hArr.length-1],p);
-          S.lArr[S.lArr.length-1]=Math.min(S.lArr[S.lArr.length-1],p);
-          setTxt('rp-hi',fmt(Math.max(...S.hArr)));setTxt('oh-h',fmt(Math.max(...S.hArr)));
-          setTxt('rp-lo',fmt(Math.min(...S.lArr)));setTxt('oh-l',fmt(Math.min(...S.lArr)));
+  // ── 2. Chart rebuild si TF changé ou 1er chargement ──
+  if (!S.chartLoaded || S.chartTF !== S.tf) {
+    // Essayer Binance REST pour l'historique réel
+    const binD = await fetchBinanceHistory(S.tf);
+    if (binD && binD.length > 10) {
+      console.log('[Binance REST]', binD.length, 'bougies chargées');
+      // Appliquer offset
+      S.ohlcv[S.tf] = binD.map(d => ({
+        time: d.time, open: d.open, high: d.high,
+        low: d.low, close: d.close, volume: d.volume
+      }));
+      // Calibrer offset si API pas encore répondu
+      if (S.price > 100 && priceOffset === 0) {
+        const lc = binD[binD.length-1].close;
+        if (Math.abs(S.price - lc) < 200) {
+          priceOffset = +(S.price - lc).toFixed(2);
+          // Re-appliquer offset sur les données
+          S.ohlcv[S.tf] = S.ohlcv[S.tf].map(d => ({
+            ...d,
+            open:  +(d.open+priceOffset).toFixed(2),
+            high:  +(d.high+priceOffset).toFixed(2),
+            low:   +(d.low+priceOffset).toFixed(2),
+            close: +(d.close+priceOffset).toFixed(2),
+          }));
         }
-        setTxt('oh-c',fmt(p));
-      } catch(e){}
-      try{CRS.update({time:now,value:S.corr});}catch(e){}
+      }
+    }
+    buildChart();
+    // Lancer WS Binance après 1er chart
+    if (!wsPrice || wsPrice.readyState > 1) startBinanceWS();
+  } else {
+    // Mise à jour live si pas de WS kline Binance
+    if (!binanceOk || !wsKline || wsKline.readyState !== 1) {
+      const now=Math.floor(Date.now()/1000), p=S.price, pv=S.prev||p;
+      if (p>100) {
+        try { CSER.update({time:now,open:+pv.toFixed(2),
+          high:+Math.max(p,pv).toFixed(2),low:+Math.min(p,pv).toFixed(2),
+          close:+p.toFixed(2)});
+          if (S.hArr.length) {
+            S.hArr[S.hArr.length-1]=Math.max(S.hArr[S.hArr.length-1],p);
+            S.lArr[S.lArr.length-1]=Math.min(S.lArr[S.lArr.length-1],p);
+          }
+        } catch(e){}
+        try { CRS.update({time:now, value:S.corr}); } catch(e){}
+      }
     }
     computeATRLevels();
   }
 
-  updateMarketBanner();
+  updateConnStatus(binanceOk);
   updateUI();
-  setTimeout(mainLoop, S.apiOk?3000:2000);
+  setTimeout(mainLoop, S.apiOk?3000:2500);
 }
 
 /* ══════════ CONTROLS ══════════ */
@@ -1440,16 +1618,22 @@ function filterLog(f,el){
 }
 
 // ── DÉMARRAGE IMMÉDIAT ──
-// Afficher le chart dès le chargement sans attendre l'API
 (function initImmediate() {
+  // Prix et chart affichés IMMÉDIATEMENT (données Python pré-générées)
   S.price = 4328.92; S.bid = 4328.77; S.ask = 4329.07;
-  S.chg = 0; S.pct = 0;
-  // Construire le chart avec les données pré-chargées
-  buildChart();
+  S.openPrice = 4328.92; S.chg = 0; S.pct = 0;
+  buildChart();   // Chart visible dès la 1ère frame
   updateUI();
+  // Relancer WS kline si TF change
+  document.querySelectorAll('.tf-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (wsKline && wsKline.readyState <= 1) wsKline.close();
+      wsKline = null;
+    });
+  });
 })();
 
-mainLoop();
+mainLoop();  // Lance API Render + Binance REST + WebSocket
 </script>
 </body>
 </html>
