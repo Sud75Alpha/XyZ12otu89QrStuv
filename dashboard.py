@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="GOLD/DXY PRO", page_icon="⚡",
+st.set_page_config(page_title="GOLD/DXY PRO v16", page_icon="⚡",
                    layout="wide", initial_sidebar_state="collapsed")
 
 st.markdown("""<style>
@@ -277,6 +277,45 @@ table.ht td{padding:4px 7px;border-bottom:1px solid rgba(255,255,255,.03);
   font-family:'JetBrains Mono',monospace;}
 table.ht tr:hover td{background:rgba(255,255,255,.02);}
 
+/* ─── ALERT BANNER ─── */
+#alert-banner{
+  position:fixed;top:50px;left:0;right:0;z-index:9998;
+  padding:10px 20px;display:none;align-items:center;gap:12px;
+  background:linear-gradient(90deg,rgba(255,77,106,0.95),rgba(180,0,40,0.95));
+  border-bottom:2px solid rgba(255,77,106,0.6);
+  font-size:.72rem;font-weight:600;color:#fff;
+  box-shadow:0 4px 20px rgba(255,77,106,0.4);
+  animation:slideDown .3s ease;
+}
+@keyframes slideDown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+#alert-banner .ab-icon{font-size:1.1rem;flex-shrink:0;}
+#alert-banner .ab-msg{flex:1;}
+#alert-banner .ab-time{font-size:.56rem;opacity:.8;white-space:nowrap;}
+#alert-banner .ab-close{cursor:pointer;opacity:.7;font-size:.9rem;padding:2px 6px;
+  border-radius:4px;background:rgba(255,255,255,.15);}
+#alert-banner .ab-close:hover{opacity:1;background:rgba(255,255,255,.25);}
+
+/* Trade result toast */
+#trade-toast{
+  position:fixed;top:70px;right:20px;z-index:9999;
+  padding:12px 18px;border-radius:10px;font-size:.76rem;
+  font-weight:700;display:none;flex-direction:column;gap:4px;
+  box-shadow:0 8px 32px rgba(0,0,0,0.5);min-width:200px;
+  animation:toastIn .3s ease;
+}
+@keyframes toastIn{from{transform:translateX(120%);opacity:0}to{transform:translateX(0);opacity:1}}
+#trade-toast.win{background:rgba(0,212,170,.95);border:1px solid var(--green);color:#000;}
+#trade-toast.loss{background:rgba(255,77,106,.95);border:1px solid var(--red);color:#fff;}
+#trade-toast .tt-title{font-size:.9rem;}
+#trade-toast .tt-sub{font-size:.6rem;font-weight:500;opacity:.85;}
+
+/* Signal result badge dans sidebar */
+.res-badge{display:inline-flex;padding:2px 8px;border-radius:5px;
+  font-size:.56rem;font-weight:700;letter-spacing:.04em;margin-left:6px;}
+.res-badge.win{background:rgba(0,212,170,.15);border:1px solid rgba(0,212,170,.4);color:var(--green);}
+.res-badge.loss{background:rgba(255,77,106,.15);border:1px solid rgba(255,77,106,.4);color:var(--red);}
+.res-badge.open{background:rgba(245,166,35,.12);border:1px solid rgba(245,166,35,.3);color:var(--gold);}
+
 /* ─── TICKER ─── */
 #ticker{height:26px;border-top:1px solid var(--border);background:var(--bg2);
   display:flex;align-items:center;padding:0 12px;gap:16px;overflow:hidden;flex-shrink:0;}
@@ -288,6 +327,20 @@ table.ht tr:hover td{background:rgba(255,255,255,.02);}
 </style>
 </head>
 <body>
+
+<!-- ALERT BANNER (TradeMonitor) -->
+<div id="alert-banner">
+  <span class="ab-icon">🚨</span>
+  <span class="ab-msg" id="ab-msg">—</span>
+  <span class="ab-time" id="ab-time">—</span>
+  <span class="ab-close" onclick="dismissAlert()">✕</span>
+</div>
+
+<!-- TRADE RESULT TOAST -->
+<div id="trade-toast">
+  <div class="tt-title" id="tt-title">—</div>
+  <div class="tt-sub" id="tt-sub">—</div>
+</div>
 
 <!-- TOPBAR -->
 <div id="topbar">
@@ -426,13 +479,13 @@ table.ht tr:hover td{background:rgba(255,255,255,.02);}
           <button class="ct-btn active" id="btn-c" onclick="setChartType('candle')">Candle</button>
           <button class="ct-btn" id="btn-l" onclick="setChartType('line')">Line</button>
           <div class="csep"></div>
-          <button class="tf-pill" onclick="setPill(this)">1m</button>
-          <button class="tf-pill" onclick="setPill(this)">5m</button>
-          <button class="tf-pill" onclick="setPill(this)">10m</button>
-          <button class="tf-pill active" onclick="setPill(this)">15m</button>
-          <button class="tf-pill" onclick="setPill(this)">1h</button>
-          <button class="tf-pill" onclick="setPill(this)">5h</button>
-          <button class="tf-pill" onclick="setPill(this)">All</button>
+          <button class="tf-pill" onclick="setPill(this,'M5',5)">1m</button>
+          <button class="tf-pill" onclick="setPill(this,'M5',5)">5m</button>
+          <button class="tf-pill" onclick="setPill(this,'M5',5)">10m</button>
+          <button class="tf-pill active" onclick="setPill(this,'M15',15)">15m</button>
+          <button class="tf-pill" onclick="setPill(this,'H1',60)">1h</button>
+          <button class="tf-pill" onclick="setPill(this,'H1',60)">5h</button>
+          <button class="tf-pill" onclick="setPill(this,'H1',60)">All</button>
           <div class="csep"></div>
           <span style="font-size:.52rem;color:var(--muted)">EMA20<b style="color:var(--gold)"> ●</b> EMA50<b style="color:rgba(255,255,255,.2)"> ●</b></span>
           <span style="margin-left:auto;font-size:.52rem;color:var(--muted)" id="clock">--:--:--</span>
@@ -687,6 +740,7 @@ const S = {
   sig:'WAIT', conf:0, entry:0, tp:0, sl:0, rr:0, lot:0,
   pipe:'IDLE', wins:0, losses:0, wr:0,
   atr:0, atrMode:'balanced', openPrice:0,
+  lastAlert:null, lastAlertTime:0, tradeResult:'',
   apiOk:false, mt5Ok:false, tick:0, tf:'M15', logFilter:'ALL',
   ohlcv:"OHLCV_PLACEHOLDER", mtf:{H1:{},M15:{},M5:{}},
   zones:{}, logs:[], signals:[],
@@ -700,6 +754,91 @@ const ATR_MODES = {
   aggressive:   {slMult:2.0, tpMult:5.0, label:'Agressif'},
   swing:        {slMult:3.0, tpMult:6.0, label:'Swing'},
 };
+
+/* ══════════ ALERTS & TRADE RESULTS ══════════ */
+let alertTimer = null;
+
+function showAlert(msg) {
+  const banner = document.getElementById('alert-banner');
+  const msgEl  = document.getElementById('ab-msg');
+  const timeEl = document.getElementById('ab-time');
+  if (!banner || !msg) return;
+  msgEl.textContent  = msg;
+  timeEl.textContent = new Date().toLocaleTimeString('fr-FR');
+  banner.style.display = 'flex';
+  // Auto-dismiss après 30s
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(dismissAlert, 30000);
+  // Notification son (bip discret)
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+    osc.start(); osc.stop(ctx.currentTime + 0.4);
+  } catch(e){}
+  // Faire clignoter le titre de la page
+  let blink = 0;
+  const origTitle = document.title;
+  const blinkTimer = setInterval(() => {
+    document.title = blink++ % 2 === 0 ? '🚨 ALERTE BOT — ' + origTitle : origTitle;
+    if (blink > 10) { clearInterval(blinkTimer); document.title = origTitle; }
+  }, 500);
+}
+
+function dismissAlert() {
+  const banner = document.getElementById('alert-banner');
+  if (banner) banner.style.display = 'none';
+  clearTimeout(alertTimer);
+}
+
+function showTradeResult(result, profit) {
+  const toast  = document.getElementById('trade-toast');
+  const title  = document.getElementById('tt-title');
+  const sub    = document.getElementById('tt-sub');
+  if (!toast) return;
+  if (result === 'WIN') {
+    toast.className = 'win';
+    title.textContent = '✅ TRADE GAGNANT';
+    sub.textContent   = profit ? 'Profit: +' + (+profit).toFixed(2) + ' USD' : 'TP atteint';
+  } else if (result === 'LOSS') {
+    toast.className = 'loss';
+    title.textContent = '❌ TRADE PERDANT';
+    sub.textContent   = profit ? 'Perte: ' + (+profit).toFixed(2) + ' USD' : 'SL touché';
+  }
+  toast.style.display = 'flex';
+  setTimeout(() => { toast.style.display = 'none'; }, 8000);
+}
+
+/* Vérifier si TP/SL touché côté dashboard (si l'API ne le dit pas) */
+function checkTPSL() {
+  if (!S.entry || !S.tp || !S.sl || !S.price) return;
+  if (S.tradeResult === 'WIN' || S.tradeResult === 'LOSS') return;
+  if (S.sig !== 'BUY' && S.sig !== 'SELL') return;
+  const isBuy = S.sig === 'BUY';
+  let hit = null;
+  if (isBuy) {
+    if (S.price >= S.tp) hit = 'WIN';
+    else if (S.price <= S.sl) hit = 'LOSS';
+  } else {
+    if (S.price <= S.tp) hit = 'WIN';
+    else if (S.price >= S.sl) hit = 'LOSS';
+  }
+  if (hit) {
+    S.tradeResult = hit;
+    const profit = hit==='WIN' ? Math.abs(S.tp - S.entry) * (S.lot||0.1) * 100
+                               : -Math.abs(S.entry - S.sl) * (S.lot||0.1) * 100;
+    showTradeResult(hit, profit);
+    // Alert aussi
+    showAlert((hit==='WIN'?'✅ TP atteint':'🛑 SL touché') +
+              ' — XAUUSD @ ' + S.price.toFixed(2));
+    S.tp = 0; S.sl = 0; S.entry = 0;
+  }
+}
 
 /* ══════════ MARKET HOURS ══════════ */
 function isMarketClosed() {
@@ -739,42 +878,55 @@ function getMarketStatus() {
 const gcEl = document.getElementById('gc');
 const ccEl = document.getElementById('cc');
 
+// ── Gold chart ──
 const GC = LightweightCharts.createChart(gcEl, {
-  layout:{background:{color:'#0f1623'},textColor:'#4a5568'},
-  grid:{vertLines:{color:'rgba(255,255,255,0.03)'},horzLines:{color:'rgba(255,255,255,0.03)'}},
-  crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
-  rightPriceScale:{borderColor:'rgba(255,255,255,0.06)',scaleMargins:{top:0.05,bottom:0.2}},
-  timeScale:{borderColor:'rgba(255,255,255,0.06)',timeVisible:true,secondsVisible:false},
-  handleScroll:{mouseWheel:true,pressedMouseMove:true},
-  handleScale:{mouseWheel:true,pinch:true},
+  layout: { background:{color:'#0f1623'}, textColor:'#4a5568' },
+  grid:   { vertLines:{color:'rgba(255,255,255,0.03)'}, horzLines:{color:'rgba(255,255,255,0.03)'} },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+  rightPriceScale: { borderColor:'rgba(255,255,255,0.06)', scaleMargins:{top:0.05,bottom:0.2} },
+  timeScale: { borderColor:'rgba(255,255,255,0.06)', timeVisible:true, secondsVisible:false },
+  handleScroll: { mouseWheel:true, pressedMouseMove:true },
+  handleScale:  { mouseWheel:true, pinch:true },
 });
 
+// Séries gold — déclarées une seule fois, jamais recréées
 let CSER = GC.addCandlestickSeries({
   upColor:'#00d4aa', downColor:'#ff4d6a',
   borderUpColor:'#00d4aa', borderDownColor:'#ff4d6a',
   wickUpColor:'rgba(0,212,170,0.8)', wickDownColor:'rgba(255,77,106,0.8)',
 });
-const E20 = GC.addLineSeries({color:'rgba(245,166,35,0.85)',lineWidth:1.5,lineStyle:0,priceLineVisible:false,lastValueVisible:false});
-const E50 = GC.addLineSeries({color:'rgba(255,255,255,0.2)',lineWidth:1,priceLineVisible:false,lastValueVisible:false});
-const VOLS = GC.addHistogramSeries({
-  priceFormat:{type:'volume'}, priceScaleId:'vol',
-  scaleMargins:{top:0.85,bottom:0},
-});
-const TPL = GC.addLineSeries({color:'rgba(0,212,170,0.7)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false});
-const SLL = GC.addLineSeries({color:'rgba(255,77,106,0.7)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false});
+let LSER = null;   // Série ligne (créée à la demande)
+let chartMode = 'candle';  // 'candle' | 'line'
 
+const E20  = GC.addLineSeries({ color:'rgba(245,166,35,0.85)', lineWidth:1.5, lineStyle:0, priceLineVisible:false, lastValueVisible:false });
+const E50  = GC.addLineSeries({ color:'rgba(255,255,255,0.2)',  lineWidth:1,   priceLineVisible:false, lastValueVisible:false });
+const VOLS = GC.addHistogramSeries({ priceFormat:{type:'volume'}, priceScaleId:'vol', scaleMargins:{top:0.85,bottom:0} });
+const TPL  = GC.addLineSeries({ color:'rgba(0,212,170,0.7)',  lineWidth:1, lineStyle:2, priceLineVisible:false, lastValueVisible:false });
+const SLL  = GC.addLineSeries({ color:'rgba(255,77,106,0.7)', lineWidth:1, lineStyle:2, priceLineVisible:false, lastValueVisible:false });
+
+// ── Corrélation chart ──
 const CC = LightweightCharts.createChart(ccEl, {
-  layout:{background:{color:'#0f1623'},textColor:'#4a5568'},
-  grid:{vertLines:{color:'rgba(255,255,255,0.02)'},horzLines:{color:'rgba(255,255,255,0.02)'}},
-  rightPriceScale:{borderColor:'rgba(255,255,255,0.06)'},
-  timeScale:{borderColor:'rgba(255,255,255,0.06)',visible:false},
-  crosshair:{mode:LightweightCharts.CrosshairMode.Normal},
+  layout: { background:{color:'#0f1623'}, textColor:'#4a5568' },
+  grid:   { vertLines:{color:'rgba(255,255,255,0.02)'}, horzLines:{color:'rgba(255,255,255,0.02)'} },
+  rightPriceScale: { borderColor:'rgba(255,255,255,0.06)' },
+  timeScale: { borderColor:'rgba(255,255,255,0.06)', visible:false },
+  crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
 });
-const CRS = CC.addLineSeries({
-  color:'#f5a623', lineWidth:1.5, priceLineVisible:false, lastValueVisible:true,
+
+// Séries corrélation — TOUTES créées une seule fois ici
+const CRS  = CC.addLineSeries({ color:'#f5a623', lineWidth:2, priceLineVisible:false, lastValueVisible:true,
   autoscaleInfoProvider: () => { return {priceRange:{minValue:-1,maxValue:1}}; }
 });
+// Lignes de référence fixes (créées une fois, jamais recréées)
+const REF_LINES = [-0.6, -0.3, 0, 0.3, 0.6].map(v =>
+  CC.addLineSeries({
+    color: v < 0 ? 'rgba(0,212,170,0.18)' : v === 0 ? 'rgba(255,255,255,0.1)' : 'rgba(255,77,106,0.18)',
+    lineWidth:1, lineStyle:2, priceLineVisible:false, lastValueVisible:false,
+    autoscaleInfoProvider: () => { return {priceRange:{minValue:-1,maxValue:1}}; }
+  })
+);
 
+// Resize responsive
 const ro = new ResizeObserver(() => {
   GC.resize(gcEl.offsetWidth, gcEl.offsetHeight);
   CC.resize(ccEl.offsetWidth, ccEl.offsetHeight);
@@ -830,39 +982,42 @@ function calcEMA(data, span) {
 
 /* ══════════ CORR SERIES ══════════ */
 function buildCorrSeries(data, realCorr) {
-  if (!data || data.length<2) return [];
-  const out=[], n=data.length;
-  let cv = typeof realCorr==='number' ? realCorr : -0.65;
-  // Walk backwards from realCorr to make a realistic history
-  const noise = 0.007;
-  // Build array forward from a past value
-  let start = Math.max(-1, Math.min(1, cv + (Math.random()-0.5)*0.3));
-  let cur = start;
-  for (let i=0; i<n; i++) {
-    if (i===n-1) { cur=realCorr; }
-    else { cur = Math.max(-1, Math.min(1, cur+(Math.random()-0.5)*noise)); }
-    out.push({time:data[i].time, value:+cur.toFixed(4)});
+  // Génère une courbe de corrélation réaliste ancrée sur la vraie valeur API
+  if (!data || data.length < 2) return [];
+  const n   = data.length;
+  const out = [];
+  const target = typeof realCorr === 'number' ? Math.max(-1, Math.min(1, realCorr)) : -0.65;
+  // Départ aléatoire dans la plage opposée pour créer du mouvement
+  let cv = Math.max(-1, Math.min(1, target + (Math.random() - 0.5) * 0.4));
+  for (let i = 0; i < n; i++) {
+    // Convergence progressive vers la vraie valeur sur les 20 dernières bougies
+    const distFromEnd = n - 1 - i;
+    if (distFromEnd < 20) {
+      // Interpoler linéairement vers target
+      cv = cv + (target - cv) * (1 / (distFromEnd + 1));
+    } else {
+      cv = Math.max(-1, Math.min(1, cv + (Math.random() - 0.5) * 0.008));
+    }
+    out.push({ time: data[i].time, value: +cv.toFixed(4) });
   }
+  // Forcer la dernière valeur = vraie corrélation API
+  if (out.length > 0) out[out.length - 1].value = target;
   return out;
 }
 
-/* ══════════ BUILD CHART ══════════ */
-const TF_MINS = {M5:5,M15:15,H1:60};
-
 function buildChart() {
-  const tf = S.tf;
-  S.chartTF = tf;
-  const raw = S.ohlcv[tf];
-  const base = S.price>100 ? S.price : 4328.92;
+  const tf   = S.tf;
+  const raw  = S.ohlcv[tf];
+  const base = S.price > 100 ? S.price : 4328.92;
 
+  // ── 1. Données candles ──
   let data;
-  if (raw && raw.length>5) {
+  if (raw && raw.length > 5) {
     data = parseAPICandles(raw, base);
   }
-  if (!data || data.length<5) {
+  if (!data || data.length < 5) {
     const mkt = getMarketStatus();
     if (mkt.closed) {
-      // Marché fermé sans données API → sim réduite + overlay
       data = simCandles(500, TF_MINS[tf], base);
       showMarketClosedOverlay(mkt);
     } else {
@@ -873,56 +1028,73 @@ function buildChart() {
     hideMarketClosedOverlay();
   }
 
-  // Sort & deduplicate
-  data.sort((a,b)=>a.time-b.time);
-  const seen=new Set();
-  data = data.filter(d => { if(seen.has(d.time))return false; seen.add(d.time);return true; });
-
+  // Sort + dédupliquer par timestamp
+  data.sort((a, b) => a.time - b.time);
+  const seen = new Set();
+  data = data.filter(d => { if (seen.has(d.time)) return false; seen.add(d.time); return true; });
   if (!data.length) return;
 
-  // Compute ATR from real data
+  // ── 2. Calcul ATR, EMA ──
   S.atr = calcATR(data, 14);
-
-  const ema20 = calcEMA(data,20);
-  const ema50 = calcEMA(data,50);
-  const vol   = data.map(d=>({
-    time:d.time, value:d.vol||500,
-    color:d.close>=d.open?'rgba(0,212,170,0.4)':'rgba(255,77,106,0.4)'
+  const ema20 = calcEMA(data, 20);
+  const ema50 = calcEMA(data, 50);
+  const vol   = data.map(d => ({
+    time: d.time, value: d.vol || 500,
+    color: d.close >= d.open ? 'rgba(0,212,170,0.4)' : 'rgba(255,77,106,0.4)'
   }));
-  const corrD = buildCorrSeries(data, S.corr);
 
-  CSER.setData(data);
+  // ── 3. Corrélation ──
+  const corrData = buildCorrSeries(data, S.corr);
+
+  // ── 4. Alimenter les séries selon le mode candle/line ──
+  if (chartMode === 'line') {
+    // Cacher les chandeliers, montrer la ligne
+    CSER.setData([]);          // vider les chandeliers
+    VOLS.setData([]);
+    if (!LSER) {
+      LSER = GC.addLineSeries({ color:'#f5a623', lineWidth:2, priceLineVisible:false, crosshairMarkerVisible:true });
+    }
+    LSER.setData(data.map(d => ({ time:d.time, value:d.close })));
+  } else {
+    // Chandeliers
+    if (LSER) { LSER.setData([]); }  // vider la ligne
+    CSER.setData(data);
+    VOLS.setData(vol);
+  }
+
   E20.setData(ema20);
   E50.setData(ema50);
-  VOLS.setData(vol);
-  CRS.setData(corrD);
 
-  // Corr reference lines
-  [-0.6,-0.3,0,0.3,0.6].forEach(v => {
-    try {
-      const ls = CC.addLineSeries({color:v<0?'rgba(0,212,170,0.2)':'rgba(255,77,106,0.2)',lineWidth:1,lineStyle:2,priceLineVisible:false,lastValueVisible:false});
-      ls.setData([{time:data[0].time,value:v},{time:data[data.length-1].time,value:v}]);
-    } catch(e){}
+  // ── 5. Corrélation — setData sur les séries existantes (pas de addLineSeries) ──
+  CRS.setData(corrData);
+  // Lignes de référence : étendre sur toute la durée du chart
+  const t0 = data[0].time, t1 = data[data.length - 1].time;
+  const refVals = [-0.6, -0.3, 0, 0.3, 0.6];
+  REF_LINES.forEach((ls, i) => {
+    ls.setData([{ time: t0, value: refVals[i] }, { time: t1, value: refVals[i] }]);
   });
 
-  S.hArr = data.map(x=>x.high);
-  S.lArr = data.map(x=>x.low);
-  const lc = data[data.length-1];
+  // ── 6. TP/SL ──
+  drawTPSL(t0, t1);
+
+  // ── 7. Stats jour ──
+  S.hArr = data.map(x => x.high);
+  S.lArr = data.map(x => x.low);
+  const lc = data[data.length - 1];
   setTxt('oh-o', fmt(lc.open));
   setTxt('oh-h', fmt(lc.high));
   setTxt('oh-l', fmt(lc.low));
-  setTxt('oh-c', fmt(S.price>0?S.price:lc.close));
-  setTxt('oh-v', (lc.vol/1000).toFixed(1)+'K');
+  setTxt('oh-c', fmt(S.price > 0 ? S.price : lc.close));
+  setTxt('oh-v', ((lc.vol || 0) / 1000).toFixed(1) + 'K');
   setTxt('rp-hi', fmt(Math.max(...S.hArr)));
   setTxt('rp-lo', fmt(Math.min(...S.lArr)));
 
-  drawTPSL(data[0].time, data[data.length-1].time);
   GC.timeScale().fitContent();
+  S.chartTF     = tf;
   S.chartLoaded = true;
-
-  // ATR-based TP/SL
   computeATRLevels();
 }
+
 
 function parseAPICandles(raw, realPrice) {
   const data = [];
@@ -1228,10 +1400,30 @@ function applySnap(d) {
   ['M5','M15','H1'].forEach(tf=>{
     if(ohlcv[tf]&&Array.isArray(ohlcv[tf])&&ohlcv[tf].length>5) {
       S.ohlcv[tf]=ohlcv[tf];
-      // Forcer rebuild du chart si le TF courant a de nouvelles données réelles
       if(tf===S.tf) S.chartTF='';
     }
   });
+  // ── Monitor alert (TradeMonitor) ──
+  const alert = sig.monitor_alert ?? d.monitor_alert ?? null;
+  if (alert && alert !== S.lastAlert) {
+    S.lastAlert     = alert;
+    S.lastAlertTime = Date.now();
+    showAlert(alert);
+  }
+  // ── Résultat trade (WIN/LOSS/OPEN) depuis le signal ──
+  const res = sig.result ?? sig.trade_result ?? d.trade_result ?? null;
+  if (res) {
+    S.tradeResult = String(res).toUpperCase();
+    if (S.tradeResult === 'WIN' || S.tradeResult === 'LOSS') {
+      // Trade terminé → réinitialiser TP/SL affichés
+      S.tp = 0; S.sl = 0; S.entry = 0;
+      showTradeResult(S.tradeResult, sig.profit ?? 0);
+    }
+  } else {
+    // Pas de résultat = trade potentiellement en cours ou WAIT
+    if (S.sig !== 'BUY' && S.sig !== 'SELL') S.tradeResult = '';
+    else if (!S.tradeResult) S.tradeResult = 'OPEN';
+  }
 }
 
 /* ══════════ UI ══════════ */
@@ -1398,6 +1590,91 @@ function renderLogs(){
     const cl={INFO:'i',WARNING:'w',ERROR:'e',SIGNAL:'s'}[lv]||'i';
     return `<div class="ll ${cl}">${l.time||''} [${lv}] ${l.msg||''}</div>`;
   }).join('');
+}
+
+/* ══════════ ALERTS & TRADE RESULTS ══════════ */
+let alertTimer = null;
+
+function showAlert(msg) {
+  const banner = document.getElementById('alert-banner');
+  const msgEl  = document.getElementById('ab-msg');
+  const timeEl = document.getElementById('ab-time');
+  if (!banner || !msg) return;
+  msgEl.textContent  = msg;
+  timeEl.textContent = new Date().toLocaleTimeString('fr-FR');
+  banner.style.display = 'flex';
+  // Auto-dismiss après 30s
+  clearTimeout(alertTimer);
+  alertTimer = setTimeout(dismissAlert, 30000);
+  // Notification son (bip discret)
+  try {
+    const ctx = new AudioContext();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.frequency.value = 880;
+    osc.type = 'sine';
+    gain.gain.setValueAtTime(0.3, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.4);
+    osc.start(); osc.stop(ctx.currentTime + 0.4);
+  } catch(e){}
+  // Faire clignoter le titre de la page
+  let blink = 0;
+  const origTitle = document.title;
+  const blinkTimer = setInterval(() => {
+    document.title = blink++ % 2 === 0 ? '🚨 ALERTE BOT — ' + origTitle : origTitle;
+    if (blink > 10) { clearInterval(blinkTimer); document.title = origTitle; }
+  }, 500);
+}
+
+function dismissAlert() {
+  const banner = document.getElementById('alert-banner');
+  if (banner) banner.style.display = 'none';
+  clearTimeout(alertTimer);
+}
+
+function showTradeResult(result, profit) {
+  const toast  = document.getElementById('trade-toast');
+  const title  = document.getElementById('tt-title');
+  const sub    = document.getElementById('tt-sub');
+  if (!toast) return;
+  if (result === 'WIN') {
+    toast.className = 'win';
+    title.textContent = '✅ TRADE GAGNANT';
+    sub.textContent   = profit ? 'Profit: +' + (+profit).toFixed(2) + ' USD' : 'TP atteint';
+  } else if (result === 'LOSS') {
+    toast.className = 'loss';
+    title.textContent = '❌ TRADE PERDANT';
+    sub.textContent   = profit ? 'Perte: ' + (+profit).toFixed(2) + ' USD' : 'SL touché';
+  }
+  toast.style.display = 'flex';
+  setTimeout(() => { toast.style.display = 'none'; }, 8000);
+}
+
+/* Vérifier si TP/SL touché côté dashboard (si l'API ne le dit pas) */
+function checkTPSL() {
+  if (!S.entry || !S.tp || !S.sl || !S.price) return;
+  if (S.tradeResult === 'WIN' || S.tradeResult === 'LOSS') return;
+  if (S.sig !== 'BUY' && S.sig !== 'SELL') return;
+  const isBuy = S.sig === 'BUY';
+  let hit = null;
+  if (isBuy) {
+    if (S.price >= S.tp) hit = 'WIN';
+    else if (S.price <= S.sl) hit = 'LOSS';
+  } else {
+    if (S.price <= S.tp) hit = 'WIN';
+    else if (S.price >= S.sl) hit = 'LOSS';
+  }
+  if (hit) {
+    S.tradeResult = hit;
+    const profit = hit==='WIN' ? Math.abs(S.tp - S.entry) * (S.lot||0.1) * 100
+                               : -Math.abs(S.entry - S.sl) * (S.lot||0.1) * 100;
+    showTradeResult(hit, profit);
+    // Alert aussi
+    showAlert((hit==='WIN'?'✅ TP atteint':'🛑 SL touché') +
+              ' — XAUUSD @ ' + S.price.toFixed(2));
+    S.tp = 0; S.sl = 0; S.entry = 0;
+  }
 }
 
 /* ══════════ MARKET HOURS ══════════ */
@@ -1576,64 +1853,113 @@ async function mainLoop() {
 }
 
 /* ══════════ CONTROLS ══════════ */
+
+// ── Navigation onglets ──
 function goTab(tab, btn) {
-  document.querySelectorAll('.tab-panel').forEach(e=>e.classList.remove('active'));
-  document.querySelectorAll('.nav-btn,.ib').forEach(e=>e.classList.remove('active'));
-  const p=document.getElementById('p-'+tab); if(p) p.classList.add('active');
-  if(btn) btn.classList.add('active');
-  if(tab==='chart'){setTimeout(()=>{GC.resize(gcEl.offsetWidth,gcEl.offsetHeight);CC.resize(ccEl.offsetWidth,ccEl.offsetHeight);},60);}
+  document.querySelectorAll('.tab-panel').forEach(e => e.classList.remove('active'));
+  document.querySelectorAll('.nav-btn,.ib').forEach(e => e.classList.remove('active'));
+  const p = document.getElementById('p-' + tab);
+  if (p) p.classList.add('active');
+  if (btn) btn.classList.add('active');
+  // Forcer resize du chart si on revient sur l'onglet chart
+  if (tab === 'chart') {
+    setTimeout(() => {
+      GC.resize(gcEl.offsetWidth, gcEl.offsetHeight);
+      CC.resize(ccEl.offsetWidth, ccEl.offsetHeight);
+    }, 60);
+  }
 }
-function setTF(tf,el){
-  S.tf=tf;S.chartTF='';S.chartLoaded=false;
-  document.querySelectorAll('.tf-tab').forEach(e=>e.classList.remove('active'));
+
+// ── Sidebar TF (M5 / M15 / H1) ──
+function setTF(tf, el) {
+  if (S.tf === tf) return;  // Rien à faire si déjà ce TF
+  S.tf          = tf;
+  S.chartTF     = '';       // Forcer rebuild
+  S.chartLoaded = false;
+  document.querySelectorAll('.tf-tab').forEach(e => e.classList.remove('active'));
   el.classList.add('active');
+  // Fermer le WS kline et le relancer sur le bon interval
+  if (wsKline && wsKline.readyState <= 1) { wsKline.close(); wsKline = null; }
+  buildChart();
 }
-function setPill(el){document.querySelectorAll('.tf-pill').forEach(e=>e.classList.remove('active'));el.classList.add('active');}
-function setChartType(t){
-  document.getElementById('btn-c').classList.toggle('active',t==='candle');
-  document.getElementById('btn-l').classList.toggle('active',t==='line');
-  S.chartTF='';S.chartLoaded=false;
-}
-function setSig(d){
-  S.sig=d;
-  const b=document.getElementById('rp-buy'),s=document.getElementById('rp-sell');
-  if(d==='BUY'){if(b){b.style.background='var(--green)';b.style.color='#000';b.style.border='none';}if(s)s.classList.remove('on');}
-  else{if(s)s.classList.add('on');if(b){b.style.background='var(--bg3)';b.style.color='var(--muted)';b.style.border='1px solid var(--border)';}}
-  computeATRLevels();updateUI();
-}
-function setATRMode(mode,el){
-  S.atrMode=mode;
-  document.querySelectorAll('.atr-btn').forEach(e=>e.classList.remove('active'));
+
+// ── Pills TF du chart toolbar (1m, 5m, 15m, 1h…) ──
+const PILL_TF_MAP = { '1m':'M5','5m':'M5','10m':'M5','15m':'M15','1h':'H1','5h':'H1','All':'H1' };
+const PILL_MINS   = { '1m':1, '5m':5, '10m':10, '15m':15, '1h':60, '5h':300, 'All':240 };
+
+function setPill(el, tf, mins) {
+  document.querySelectorAll('.tf-pill').forEach(e => e.classList.remove('active'));
   el.classList.add('active');
-  const m=ATR_MODES[mode];
-  const explain=document.getElementById('atr-explain');
-  if(explain)explain.querySelector('b').textContent=m.label;
+  const label = el.textContent.trim();
+  const newTF = tf || PILL_TF_MAP[label] || 'M15';
+  // Synchroniser aussi les sidebar tabs
+  document.querySelectorAll('.tf-tab').forEach(e => {
+    e.classList.toggle('active', e.textContent.trim() === newTF);
+  });
+  if (S.tf !== newTF) {
+    S.tf          = newTF;
+    S.chartTF     = '';
+    S.chartLoaded = false;
+    if (wsKline && wsKline.readyState <= 1) { wsKline.close(); wsKline = null; }
+    buildChart();
+  }
+}
+
+// ── Mode Candle / Line ──
+function setChartType(t) {
+  if (chartMode === t) return;  // Déjà dans ce mode
+  chartMode = t;
+  document.getElementById('btn-c').classList.toggle('active', t === 'candle');
+  document.getElementById('btn-l').classList.toggle('active', t === 'line');
+  // Rebuild les séries (sans changer le TF)
+  buildChart();
+}
+
+// ── Buy / Sell ──
+function setSig(d) {
+  S.sig = d;
+  const b = document.getElementById('rp-buy');
+  const s = document.getElementById('rp-sell');
+  if (d === 'BUY') {
+    if (b) { b.style.background='var(--green)'; b.style.color='#000'; b.style.border='none'; }
+    if (s) s.classList.remove('on');
+  } else {
+    if (s) s.classList.add('on');
+    if (b) { b.style.background='var(--bg3)'; b.style.color='var(--muted)'; b.style.border='1px solid var(--border)'; }
+  }
+  computeATRLevels();
+  updateUI();
+}
+
+// ── ATR mode ──
+function setATRMode(mode, el) {
+  S.atrMode = mode;
+  document.querySelectorAll('.atr-btn').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  const explain = document.getElementById('atr-explain');
+  if (explain) explain.querySelector('b').textContent = ATR_MODES[mode].label;
   computeATRLevels();
 }
-function filterLog(f,el){
-  S.logFilter=f;
-  document.querySelectorAll('.log-tb .ct-btn').forEach(e=>e.classList.remove('active'));
+
+// ── Log filter ──
+function filterLog(f, el) {
+  S.logFilter = f;
+  document.querySelectorAll('.log-tb .ct-btn').forEach(e => e.classList.remove('active'));
   el.classList.add('active');
   renderLogs();
 }
 
-// ── DÉMARRAGE IMMÉDIAT ──
-(function initImmediate() {
-  // Prix et chart affichés IMMÉDIATEMENT (données Python pré-générées)
+/* ══════════ DÉMARRAGE ══════════ */
+(function init() {
+  // Prix affiché immédiatement — données Python pré-générées
   S.price = 4328.92; S.bid = 4328.77; S.ask = 4329.07;
   S.openPrice = 4328.92; S.chg = 0; S.pct = 0;
   buildChart();   // Chart visible dès la 1ère frame
   updateUI();
-  // Relancer WS kline si TF change
-  document.querySelectorAll('.tf-tab').forEach(btn => {
-    btn.addEventListener('click', () => {
-      if (wsKline && wsKline.readyState <= 1) wsKline.close();
-      wsKline = null;
-    });
-  });
 })();
 
-mainLoop();  // Lance API Render + Binance REST + WebSocket
+mainLoop();  // Lance API Render + Binance WebSocket
+
 </script>
 </body>
 </html>
